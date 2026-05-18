@@ -1,0 +1,9 @@
+kind: usecase
+id: uc
+name: SQL step to a database table
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:db/table:records
+    protocol: sql

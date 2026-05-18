@@ -1,0 +1,13 @@
+kind: component
+id: PublicController
+name: PublicController
+type: controller
+methods:
+  - name: list
+    returns: void
+    httpMethod: GET
+    httpPath: /items
+  - name: create
+    returns: void
+    httpMethod: POST
+    httpPath: /items

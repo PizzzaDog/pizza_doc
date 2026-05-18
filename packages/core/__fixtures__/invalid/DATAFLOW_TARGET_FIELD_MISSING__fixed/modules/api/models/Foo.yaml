@@ -1,0 +1,7 @@
+kind: model
+id: Foo
+name: Foo
+modelKind: dto
+fields:
+  - name: x
+    type: string

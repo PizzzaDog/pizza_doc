@@ -1,0 +1,18 @@
+kind: model
+id: Pizza
+name: Pizza
+modelKind: entity
+persistedAs: module:postgres-db/domain:menu/table:pizzas
+description: "A menu item; 'available: false' hides it from the customer menu without deleting history."
+fields:
+  - name: id
+    type: uuid
+  - name: name
+    type: string
+  - name: priceCents
+    type: int
+  - name: available
+    type: boolean
+  - name: imageUrl
+    type: string
+    optional: true

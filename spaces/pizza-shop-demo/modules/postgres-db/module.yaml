@@ -1,0 +1,6 @@
+kind: module
+id: postgres-db
+name: Postgres
+type: database
+techStack: PostgreSQL 16
+description: Relational store for users, sessions, menu items, and orders.

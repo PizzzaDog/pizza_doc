@@ -1,0 +1,17 @@
+kind: component
+id: UserService
+name: UserService
+type: service
+methods:
+  - name: create
+    params:
+      - name: email
+        type: string
+    returns: User
+    calls:
+      - module:api/component:UserRepository/method:save
+      - module:api/component:PasswordHasher/method:hash
+    throws:
+      - EmailAlreadyExistsException
+    httpMethod: POST
+    httpPath: /api/users

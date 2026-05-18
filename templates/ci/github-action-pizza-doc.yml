@@ -1,0 +1,56 @@
+# Pizza Doc quality gates
+#
+# Copy this file into `.github/workflows/pizza-doc.yml` in the repo that
+# hosts your space(s). It fails the PR if:
+#   - any space has validator errors or warnings (strict mode),
+#   - coverage thresholds aren't met (defaults: components/tables/endpoints ≥ 80%, models ≥ 70%),
+#   - any endpoint has no covering use case.
+#
+# Assumes the repo uses pnpm + has `@pizza-doc/cli` in devDependencies
+# (or installed globally by `pnpm install -g pizza-doc`).
+
+name: pizza-doc
+
+on:
+  pull_request:
+    paths:
+      - 'spaces/**'
+      - '.github/workflows/pizza-doc.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'spaces/**'
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate every space
+        run: |
+          shopt -s nullglob
+          failed=0
+          for dir in spaces/*/; do
+            [ -f "${dir}space.yaml" ] || continue
+            id=$(basename "$dir")
+            echo "::group::${id}"
+            pnpm pd validate  "spaces/${id}" --strict-warnings || failed=1
+            pnpm pd coverage  "spaces/${id}" || failed=1
+            pnpm pd endpoints "spaces/${id}" --orphans || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed

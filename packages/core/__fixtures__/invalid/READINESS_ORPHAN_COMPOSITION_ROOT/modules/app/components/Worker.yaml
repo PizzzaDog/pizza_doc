@@ -1,0 +1,4 @@
+kind: component
+id: Worker
+name: Worker
+type: service

@@ -1,0 +1,5 @@
+kind: actor
+id: anon
+name: Anonymous
+type: user
+description: An unauthenticated visitor

@@ -1,0 +1,4 @@
+kind: actor
+id: user
+name: User
+type: user

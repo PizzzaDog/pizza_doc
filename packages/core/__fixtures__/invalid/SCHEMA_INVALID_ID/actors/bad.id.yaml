@@ -1,0 +1,4 @@
+kind: actor
+id: bad.id
+name: Invalid id with dot
+type: user

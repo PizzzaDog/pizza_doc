@@ -1,0 +1,13 @@
+kind: usecase
+id: uc
+name: dataflow use case
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:db/table:records
+    protocol: sql
+dataFlow:
+  - sourceField: Foo.count
+    targetField: records.count
+

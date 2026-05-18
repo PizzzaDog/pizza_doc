@@ -1,0 +1,4 @@
+kind: module
+id: worker-service
+name: worker-service
+type: service

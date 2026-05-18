@@ -1,0 +1,12 @@
+kind: component
+id: PizzaCard
+name: PizzaCard
+type: widget
+description: Presentational card for a single pizza (name, price, availability, image). Rendering is intentionally not modeled as a method — Pizza Doc describes structure and runtime flows, not React render trees; the widget is exposed so designers and docs can reference it by ref.
+methods:
+  - name: render
+    params:
+      - name: pizza
+        type: Pizza
+    returns: void
+    description: Renders one pizza row inside MenuPage.

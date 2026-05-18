@@ -1,0 +1,24 @@
+kind: component
+id: OrderController
+name: OrderController
+type: controller
+description: HTTP entry point for checkout and personal order history.
+methods:
+  - name: create
+    params:
+      - name: request
+        type: CreateOrderRequest
+    returns: OrderResponse
+    httpMethod: POST
+    httpPath: /api/orders
+    calls:
+      - module:api-server/domain:orders/component:OrderService/method:place
+    throws:
+      - StripeDeclinedException
+      - OutOfStockException
+  - name: listMine
+    returns: List<Order>
+    httpMethod: GET
+    httpPath: /api/orders
+    calls:
+      - module:api-server/domain:orders/component:OrderRepository/method:findByUser

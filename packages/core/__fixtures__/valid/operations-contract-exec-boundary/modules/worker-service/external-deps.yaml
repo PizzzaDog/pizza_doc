@@ -1,0 +1,70 @@
+- name: host-env
+  direction: outbound
+  protocol: file
+  endpoint: /etc/example/worker.env
+  purpose: Host env file that supplies local worker asset paths and ports.
+  consumer: module:worker-service
+  auth: none
+  preflightCheck:
+    sourceRef: services/worker/src/preflight.ts#checkHostAssets
+- name: base-image
+  direction: outbound
+  protocol: file
+  endpoint: $BASE_IMAGE_PATH
+  purpose: Base image copied into each worker sandbox.
+  consumer: module:worker-service
+  auth: none
+  preflightCheck:
+    sourceRef: services/worker/src/preflight.ts#checkHostAssets
+- name: legacy-worker-provision-script
+  direction: outbound
+  protocol: exec
+  endpoint: /opt/example/provision-worker.sh
+  purpose: Legacy provisioning script invoked with ordered argv.
+  consumer: module:worker-service
+  auth: none
+  preflightCheck:
+    sourceRef: services/worker/src/preflight.ts#checkHostAssets
+  positionalArgs:
+    name: LegacyWorkerArgs
+    contractTest:
+      sourceRef: services/worker/src/legacy-adapter.test.ts:91
+    acceptanceCriteria:
+      - Contract test asserts arg #6 resource_profile is nonempty.
+      - Contract test asserts arg #7 runtime is RUNTIME_API or RUNTIME_OAUTH.
+    args:
+      - position: 1
+        name: worker_id
+        type: string
+        nonempty: true
+      - position: 2
+        name: slot_id
+        type: positive-int
+      - position: 3
+        name: worker_token
+        type: secret
+        secret: true
+        nonempty: true
+      - position: 4
+        name: memory_mib
+        type: positive-int
+      - position: 5
+        name: job_name
+        type: string
+        nonempty: true
+      - position: 6
+        name: resource_profile
+        type: string
+        nonempty: true
+      - position: 7
+        name: runtime
+        type: enum
+        enumValues: [RUNTIME_API, RUNTIME_OAUTH]
+      - position: 8
+        name: worker_count
+        type: positive-int
+        defaultValue: 1
+      - position: 9
+        name: runtime_auth_data_json
+        type: json-object
+        defaultValue: "{}"

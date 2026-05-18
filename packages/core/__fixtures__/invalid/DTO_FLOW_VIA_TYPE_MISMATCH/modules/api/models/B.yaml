@@ -1,0 +1,8 @@
+kind: model
+id: B
+name: B
+modelKind: dto
+fields:
+  - name: y
+    type: string
+    optional: true

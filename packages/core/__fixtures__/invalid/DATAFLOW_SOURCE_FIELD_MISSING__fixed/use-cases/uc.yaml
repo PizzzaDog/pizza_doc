@@ -1,0 +1,12 @@
+kind: usecase
+id: uc
+name: dataFlow with valid source
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:db/table:records
+    protocol: sql
+dataFlow:
+  - sourceField: Foo.x
+    targetField: records.x

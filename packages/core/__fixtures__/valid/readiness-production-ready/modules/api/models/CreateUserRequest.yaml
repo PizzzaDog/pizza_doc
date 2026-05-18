@@ -1,0 +1,7 @@
+kind: model
+id: CreateUserRequest
+name: CreateUserRequest
+modelKind: dto
+fields:
+  - name: email
+    type: string

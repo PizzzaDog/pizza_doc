@@ -1,0 +1,15 @@
+kind: model
+id: CreatePizzaRequest
+name: CreatePizzaRequest
+modelKind: dto
+description: Admin-only request body of POST /api/admin/menu.
+fields:
+  - name: name
+    type: string
+  - name: priceCents
+    type: int
+  - name: available
+    type: boolean
+  - name: imageUrl
+    type: string
+    optional: true

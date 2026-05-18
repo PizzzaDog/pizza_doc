@@ -1,0 +1,15 @@
+kind: component
+id: CartPage
+name: CartPage
+type: page
+description: /cart — shows the current cart via CartSummary and triggers checkout on submit.
+methods:
+  - name: checkout
+    params:
+      - name: order
+        type: CreateOrderRequest
+    returns: OrderResponse
+    calls:
+      - module:web-frontend/component:CartSummary/method:compute
+      - module:web-frontend/component:orderClient/method:create
+    description: Computes totals locally for display, then submits the full order to orderClient.

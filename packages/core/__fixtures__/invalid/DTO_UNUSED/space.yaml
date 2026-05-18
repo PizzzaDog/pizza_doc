@@ -1,0 +1,3 @@
+meta:
+  id: DTO_UNUSED
+  name: a model is declared but nobody references it

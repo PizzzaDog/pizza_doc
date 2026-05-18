@@ -1,0 +1,18 @@
+kind: model
+id: OrderItem
+name: OrderItem
+modelKind: entity
+persistedAs: module:postgres-db/domain:orders/table:order_items
+description: A single pizza line on an order. All fields required on the persisted entity; client-side checkout uses CreateOrderItemRequest instead.
+fields:
+  - name: id
+    type: uuid
+  - name: orderId
+    type: uuid
+  - name: pizzaId
+    type: uuid
+  - name: quantity
+    type: int
+  - name: unitPriceCents
+    type: int
+    description: Snapshotted from pizzas.price_cents at the moment OrderService.place runs.

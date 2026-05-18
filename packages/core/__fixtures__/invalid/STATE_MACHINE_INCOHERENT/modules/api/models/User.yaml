@@ -1,0 +1,19 @@
+kind: model
+id: User
+name: User
+modelKind: entity
+persistedAs: module:db/domain:users/table:users
+fields:
+  - name: id
+    type: uuid
+  - name: email
+    type: string
+  - name: status
+    type: string
+stateMachine:
+  field: status
+  states: [ACTIVE, SUSPENDED]
+  transitions:
+    # Breaks coherence: to=DELETED which is not in states.
+    - from: ACTIVE
+      to: DELETED

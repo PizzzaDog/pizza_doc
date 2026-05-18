@@ -1,0 +1,11 @@
+kind: component
+id: OrderHistoryPage
+name: OrderHistoryPage
+type: page
+description: /orders — lists the current customer's past orders.
+methods:
+  - name: load
+    returns: List<Order>
+    calls:
+      - module:web-frontend/component:orderClient/method:listMine
+    description: Fetches the current customer's orders. Pagination is out of scope for v0.1 — see docs/backlog.md.

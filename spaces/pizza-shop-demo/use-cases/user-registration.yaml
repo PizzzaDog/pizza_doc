@@ -1,0 +1,64 @@
+kind: usecase
+id: user-registration
+name: User registers in the system
+actor: actor:anonymous-visitor
+trigger: Submitting the signup form on /signup in web-frontend
+description: Demonstrates a simple three-tier flow (page → service → DB) plus a DTO transformation (password → bcrypt hash) and basic invariants.
+invariants:
+  pre:
+    - No user with the provided email exists in the users table
+    - Password is at least 8 characters long
+  post:
+    - A new row exists in users with the provided email
+    - users.password_hash contains a bcrypt hash of the provided password
+    - The response returned to the client contains the new user's id
+steps:
+  - from: module:web-frontend/component:SignupPage
+    to: module:web-frontend/component:authClient
+    via: module:api-server/domain:users/model:CreateUserRequest
+    protocol: internal-call
+    description: Page-level submit handler delegates to the HTTP client wrapper.
+  - from: module:web-frontend/component:authClient
+    to: module:api-server/domain:users/component:AuthController
+    via: module:api-server/domain:users/model:CreateUserRequest
+    protocol: http
+    description: POST /api/auth/signup over the wire.
+  - from: module:api-server/domain:users/component:AuthController
+    to: module:api-server/domain:users/component:UserService
+    via: module:api-server/domain:users/model:CreateUserRequest
+    protocol: internal-call
+  - from: module:api-server/domain:users/component:UserService
+    to: module:api-server/domain:users/component:UserRepository
+    via: module:api-server/domain:users/model:User
+    protocol: internal-call
+    description: After password hashing, persist the User entity.
+  - from: module:api-server/domain:users/component:UserRepository
+    to: module:postgres-db/domain:users/table:users
+    protocol: sql
+    description: INSERT INTO users (id, email, password_hash, display_name).
+errorFlows:
+  - id: email-already-exists
+    condition: A user with this email already exists in users
+    steps:
+      - from: module:api-server/domain:users/component:UserRepository
+        to: module:api-server/domain:users/component:UserService
+        description: findByEmail returns a non-empty user; UserService raises the duplicate signal.
+      - from: module:api-server/domain:users/component:UserService
+        to: module:api-server/domain:users/component:AuthController
+        description: UserService throws EmailAlreadyExistsException.
+    resultDescription: 'Returns 409 Conflict with { error: "EMAIL_EXISTS" }'
+  - id: weak-password
+    condition: Password is shorter than 8 characters
+    steps:
+      - from: module:api-server/domain:users/component:UserService
+        to: module:api-server/domain:users/component:AuthController
+        description: UserService throws WeakPasswordException before any DB call.
+    resultDescription: 'Returns 400 Bad Request with { error: "WEAK_PASSWORD" }'
+dataFlow:
+  - sourceField: CreateUserRequest.email
+    targetField: users.email
+  - sourceField: CreateUserRequest.password
+    targetField: users.password_hash
+    transform: via PasswordHasher.hash (bcrypt)
+  - sourceField: CreateUserRequest.displayName
+    targetField: users.display_name

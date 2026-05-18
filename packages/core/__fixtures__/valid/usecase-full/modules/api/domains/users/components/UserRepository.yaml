@@ -1,0 +1,4 @@
+kind: component
+id: UserRepository
+name: UserRepository
+type: repository

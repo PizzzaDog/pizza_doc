@@ -1,0 +1,5 @@
+meta:
+  id: READINESS_ORPHAN_ENDPOINT
+  name: Readiness Orphan Endpoint
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

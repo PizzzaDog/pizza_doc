@@ -1,0 +1,17 @@
+kind: component
+id: orderClient
+name: orderClient
+type: client
+description: HTTP client for /api/orders; authenticated via session cookie.
+methods:
+  - name: create
+    params:
+      - name: request
+        type: CreateOrderRequest
+    returns: OrderResponse
+    httpMethod: POST
+    httpPath: /api/orders
+  - name: listMine
+    returns: List<Order>
+    httpMethod: GET
+    httpPath: /api/orders

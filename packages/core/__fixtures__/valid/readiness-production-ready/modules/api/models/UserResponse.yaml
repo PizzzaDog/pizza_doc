@@ -1,0 +1,9 @@
+kind: model
+id: UserResponse
+name: UserResponse
+modelKind: dto
+fields:
+  - name: id
+    type: uuid
+  - name: email
+    type: string

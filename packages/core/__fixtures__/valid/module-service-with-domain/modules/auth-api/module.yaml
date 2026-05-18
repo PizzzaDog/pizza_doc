@@ -1,0 +1,5 @@
+kind: module
+id: auth-api
+name: Auth API
+type: service
+techStack: Spring Boot 3 + Java 21

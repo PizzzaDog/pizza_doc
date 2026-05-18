@@ -1,0 +1,16 @@
+kind: model
+id: CreateUserRequest
+name: CreateUserRequest
+modelKind: dto
+description: Request body of POST /api/auth/signup.
+fields:
+  - name: email
+    type: string
+    description: RFC-5322 email; uniqueness is enforced at the DB level.
+  - name: password
+    type: string
+    description: Plaintext password, at least 8 characters; never persisted in this form.
+  - name: displayName
+    type: string
+    optional: true
+    description: Optional human-readable name shown in the UI.

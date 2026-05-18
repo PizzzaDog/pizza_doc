@@ -1,0 +1,5 @@
+kind: module
+id: web
+name: Web Frontend
+type: frontend
+techStack: React 19 + TypeScript + Vite

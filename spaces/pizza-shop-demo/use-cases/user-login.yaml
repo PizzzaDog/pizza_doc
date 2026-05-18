@@ -1,0 +1,58 @@
+kind: usecase
+id: user-login
+name: Customer logs in
+actor: actor:customer
+trigger: Submitting the login form on /login in web-frontend
+description: Demonstrates return values flowing back from the DB to the client and session creation.
+invariants:
+  pre:
+    - A user with the provided email exists
+    - The provided password matches users.password_hash under bcrypt.verify
+  post:
+    - A new row exists in the sessions table for this user
+    - The LoginResponse returned to the client carries a valid session token
+steps:
+  - from: module:web-frontend/component:LoginPage
+    to: module:web-frontend/component:authClient
+    via: module:api-server/domain:users/model:LoginRequest
+    protocol: internal-call
+  - from: module:web-frontend/component:authClient
+    to: module:api-server/domain:users/component:AuthController
+    via: module:api-server/domain:users/model:LoginRequest
+    protocol: http
+    description: POST /api/auth/login.
+  - from: module:api-server/domain:users/component:AuthController
+    to: module:api-server/domain:users/component:UserService
+    via: module:api-server/domain:users/model:LoginRequest
+    protocol: internal-call
+  - from: module:api-server/domain:users/component:UserService
+    to: module:api-server/domain:users/component:UserRepository
+    protocol: internal-call
+    description: findByEmail to load the stored hash.
+  - from: module:api-server/domain:users/component:UserRepository
+    to: module:postgres-db/domain:users/table:users
+    protocol: sql
+    description: SELECT id, password_hash FROM users WHERE email = ?.
+  - from: module:api-server/domain:users/component:UserService
+    to: module:api-server/domain:users/component:SessionTokenService
+    protocol: internal-call
+    description: After bcrypt.verify succeeds, mint a session token.
+  - from: module:api-server/domain:users/component:SessionTokenService
+    to: module:postgres-db/domain:users/table:sessions
+    protocol: sql
+    description: INSERT INTO sessions (id, user_id, token, expires_at).
+errorFlows:
+  - id: invalid-credentials
+    condition: No user with this email OR bcrypt.verify returns false
+    steps:
+      - from: module:api-server/domain:users/component:UserService
+        to: module:api-server/domain:users/component:AuthController
+        description: UserService throws InvalidCredentialsException.
+    resultDescription: 'Returns 401 Unauthorized with { error: "INVALID_CREDENTIALS" }'
+dataFlow:
+  - sourceField: SessionToken.userId
+    targetField: sessions.user_id
+  - sourceField: SessionToken.token
+    targetField: sessions.token
+  - sourceField: SessionToken.expiresAt
+    targetField: sessions.expires_at

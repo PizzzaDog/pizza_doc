@@ -1,0 +1,9 @@
+kind: table
+id: records
+name: records
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: x
+    sqlType: varchar(255)

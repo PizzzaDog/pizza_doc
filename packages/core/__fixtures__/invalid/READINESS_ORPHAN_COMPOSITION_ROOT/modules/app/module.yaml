@@ -1,0 +1,4 @@
+kind: module
+id: app
+name: App
+type: service

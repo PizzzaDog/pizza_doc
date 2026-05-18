@@ -1,0 +1,3 @@
+meta:
+  id: STATE_MACHINE_INCOHERENT
+  name: required model field has no matching column

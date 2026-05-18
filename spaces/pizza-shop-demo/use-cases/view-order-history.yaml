@@ -1,0 +1,26 @@
+kind: usecase
+id: view-order-history
+name: Customer views order history
+actor: actor:customer
+trigger: Navigating to /orders in web-frontend
+description: Read-only flow for showing the current customer's previous orders.
+invariants:
+  pre:
+    - The customer has a valid session cookie
+  post:
+    - The UI displays orders belonging only to the current customer
+steps:
+  - from: module:web-frontend/component:OrderHistoryPage
+    to: module:web-frontend/component:orderClient
+    protocol: internal-call
+  - from: module:web-frontend/component:orderClient
+    to: module:api-server/domain:orders/component:OrderController
+    protocol: http
+    description: GET /api/orders.
+  - from: module:api-server/domain:orders/component:OrderController
+    to: module:api-server/domain:orders/component:OrderRepository
+    protocol: internal-call
+  - from: module:api-server/domain:orders/component:OrderRepository
+    to: module:postgres-db/domain:orders/table:orders
+    protocol: sql
+    description: SELECT * FROM orders WHERE user_id = currentUser.id ORDER BY created_at DESC.

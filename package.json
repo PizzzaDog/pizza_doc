@@ -1,0 +1,43 @@
+{
+  "name": "pizza-doc",
+  "version": "0.5.1",
+  "private": true,
+  "description": "File-based architecture-as-code framework",
+  "license": "MIT",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter=./packages/* build",
+    "typecheck": "pnpm -r --filter=./packages/* typecheck",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check . && pnpm check:versions",
+    "check:fix": "biome check --write .",
+    "check:versions": "node scripts/check-versions.mjs",
+    "gen:schemas": "pnpm --filter @pizza-doc/core build && node scripts/gen-json-schemas.mjs",
+    "pd": "node packages/cli/dist/index.js",
+    "detect-slop": "impeccable detect packages/web/src/",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@changesets/cli": "2.27.9",
+    "impeccable": "^2.1.7",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4",
+    "yaml": "2.6.0",
+    "zod-to-json-schema": "3.23.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild", "sharp"],
+    "overrides": {
+      "zod-to-json-schema": "3.23.5",
+      "@astrojs/sitemap": "3.2.1"
+    }
+  }
+}

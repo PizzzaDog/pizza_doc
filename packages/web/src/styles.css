@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #101012;
+  --bg-secondary: #151517;
+  --bg-tertiary: #1c1c1f;
+  --bg-elevated: #242428;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.11);
+
+  --fg-primary: #e4e4e9;
+  --fg-secondary: #a1a1aa;
+  --fg-tertiary: #71717a;
+  --fg-muted: #51515a;
+
+  --accent: #38fffa;
+  --accent-fg: #050507;
+  --accent-muted: rgba(56, 255, 250, 0.14);
+
+  --success: #3bc98a;
+  --warning: #f0b429;
+  --error: #ef4444;
+
+  --type-controller: #6b9cff;
+  --type-service: #b57edc;
+  --type-repository: #d79b4a;
+  --type-model: #5ec888;
+  --type-table: #e58b6b;
+  --type-page: #7bc5e0;
+  --type-external: #9aa0a6;
+
+  /* Tier / kind colour tokens — used by the sequence canvas to tint
+   * participant headers + lifelines. Hues match the design handoff's
+   * Frontend/Backend/Database/External palette. */
+  --kind-frontend: #4da3ff;
+  --kind-backend: #3bc98a;
+  --kind-database: #f0b429;
+  --kind-queue: #4fd1c5;
+  --kind-external: #c08ee8;
+
+  /* Sequence canvas background dot — tuned per theme so the grid reads
+   * at 1px without competing with content. */
+  --canvas-dot: rgba(255, 255, 255, 0.08);
+  --workspace-glow: rgba(56, 255, 250, 0.08);
+
+  color-scheme: dark;
+}
+
+:root.light {
+  --bg-primary: #fdfdfd;
+  --bg-secondary: #f6f7f8;
+  --bg-tertiary: #eeeff2;
+  --bg-elevated: #ffffff;
+  --border-subtle: #e1e3e8;
+  --border-default: #e1e3e8;
+
+  --fg-primary: #0d0e10;
+  --fg-secondary: #4b5058;
+  --fg-tertiary: #6b7280;
+  --fg-muted: #9ca3af;
+
+  --accent: #4b6ee8;
+  --accent-fg: #ffffff;
+  --accent-muted: rgba(75, 110, 232, 0.1);
+
+  /* Canvas grid dot in light theme — very subtle so it never fights type. */
+  --canvas-dot: #dfe2e7;
+  --workspace-glow: rgba(75, 110, 232, 0.08);
+
+  /* Tier / kind colours re-tuned for the light theme (slightly deeper
+   * saturations so they read against white). */
+  --kind-frontend: #4b78e8;
+  --kind-database: #c98d1d;
+  --kind-backend: #22a973;
+  --kind-queue: #168f87;
+  --kind-external: #a168d4;
+
+  color-scheme: light;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-bg-primary text-fg-primary font-sans text-ui antialiased;
+    /* Settled weight per page 11. */
+    font-weight: 450;
+    letter-spacing: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.01em;
+  }
+
+  /* A thin scrollbar that matches the neutral palette. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 6px;
+    border: 2px solid var(--bg-primary);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-muted);
+  }
+}
+
+@layer utilities {
+  .ring-focus {
+    box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-muted);
+  }
+
+  .pd-workspace-grid {
+    background-color: var(--bg-primary);
+    background-image: radial-gradient(circle at center, var(--canvas-dot) 1px, transparent 1px),
+      radial-gradient(circle at 50% 8%, var(--workspace-glow), transparent 34%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 140px);
+    background-size: 24px 24px, 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0;
+  }
+
+  /* Sequence-view row background states. Tailwind's opacity modifier on
+   * CSS-variable colors is flaky across browsers, so we use the page-11
+   * `--accent-muted` token (pre-alphaed per theme) and a `--bg-tertiary`
+   * hover that stays readable in both themes. */
+  .seq-arrow-hit-bg {
+    fill: transparent;
+    transition: fill 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .seq-arrow-hit-bg.is-selected,
+  .seq-arrow-hit-bg.is-idle:hover,
+  .seq-arrow-hit-bg.is-idle:focus-visible {
+    fill: var(--bg-tertiary);
+    opacity: 0.5;
+  }
+
+  .seq-message-label-bg {
+    fill: var(--bg-primary);
+    stroke: none;
+    pointer-events: none;
+  }
+
+  /* Activation segment on a lifeline: a solid accent bar, not an outlined box. */
+  .seq-activation-band {
+    stroke: none;
+  }
+}
+
+.usecase-flow .react-flow__renderer {
+  background: radial-gradient(circle at 16% 14%, rgba(56, 255, 250, 0.055), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(59, 201, 138, 0.04), transparent 22%);
+}
+
+.usecase-flow .react-flow__node {
+  transition: transform 160ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 160ms
+    cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.usecase-flow .react-flow__panel {
+  margin: 18px;
+}
+
+.usecase-flow .react-flow__controls-button {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+  color: var(--fg-secondary);
+}
+
+.usecase-flow .react-flow__controls-button:hover {
+  background: var(--bg-secondary);
+  color: var(--fg-primary);
+}
+
+.usecase-flow .react-flow__minimap {
+  overflow: hidden;
+}

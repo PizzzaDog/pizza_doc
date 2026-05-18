@@ -1,0 +1,6 @@
+kind: component
+id: AppRoot
+name: AppRoot
+type: service
+composes:
+  - module:app/component:Worker

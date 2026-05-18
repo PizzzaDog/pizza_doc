@@ -1,0 +1,3 @@
+meta:
+  id: REF_WRONG_KIND_PERSISTED_AS
+  name: persistedAs points at a component instead of a table

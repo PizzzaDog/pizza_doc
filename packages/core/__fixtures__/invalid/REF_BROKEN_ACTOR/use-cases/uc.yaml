@@ -1,0 +1,8 @@
+kind: usecase
+id: uc
+name: uc
+actor: actor:ghost
+trigger: anything
+steps:
+  - from: module:api/component:Foo
+    to: module:api/component:Foo

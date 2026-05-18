@@ -1,0 +1,12 @@
+kind: model
+id: LoginResponse
+name: LoginResponse
+modelKind: dto
+description: Response to a successful login; the token is the session token the client attaches to subsequent requests.
+fields:
+  - name: token
+    type: string
+  - name: userId
+    type: uuid
+  - name: expiresAt
+    type: timestamp

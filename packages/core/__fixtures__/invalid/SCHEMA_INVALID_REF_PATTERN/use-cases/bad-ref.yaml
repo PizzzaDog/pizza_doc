@@ -1,0 +1,6 @@
+kind: usecase
+id: bad-ref
+name: Bad ref pattern
+actor: notaref
+trigger: anything
+steps: []

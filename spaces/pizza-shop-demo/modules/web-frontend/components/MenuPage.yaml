@@ -1,0 +1,11 @@
+kind: component
+id: MenuPage
+name: MenuPage
+type: page
+description: /menu — fetches pizzas on mount and renders each via PizzaCard.
+methods:
+  - name: load
+    returns: PizzaListResponse
+    calls:
+      - module:web-frontend/component:menuClient/method:list
+      - module:web-frontend/component:PizzaCard/method:render

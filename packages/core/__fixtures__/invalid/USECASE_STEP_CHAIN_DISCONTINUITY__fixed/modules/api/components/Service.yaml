@@ -1,0 +1,4 @@
+kind: component
+id: Service
+name: Service
+type: service

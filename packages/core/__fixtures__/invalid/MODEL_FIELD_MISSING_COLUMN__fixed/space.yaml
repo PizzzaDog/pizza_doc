@@ -1,0 +1,3 @@
+meta:
+  id: MODEL_FIELD_MISSING_COLUMN__fixed
+  name: Fixed — all required fields map to columns

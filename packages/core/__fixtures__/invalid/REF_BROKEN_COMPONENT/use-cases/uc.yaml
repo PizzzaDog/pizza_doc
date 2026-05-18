@@ -1,0 +1,9 @@
+kind: usecase
+id: uc
+name: Use case with broken component ref
+actor: actor:anon
+trigger: anything
+steps:
+  - from: module:api/component:ExistingService
+    to: module:api/component:GhostService
+    protocol: internal-call

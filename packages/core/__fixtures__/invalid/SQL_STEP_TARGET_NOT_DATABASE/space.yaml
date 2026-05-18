@@ -1,0 +1,3 @@
+meta:
+  id: SQL_STEP_TARGET_NOT_DATABASE
+  name: SQL step targeting a non-database module

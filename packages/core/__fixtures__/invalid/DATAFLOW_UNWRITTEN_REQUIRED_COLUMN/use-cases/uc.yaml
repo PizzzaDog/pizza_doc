@@ -1,0 +1,12 @@
+kind: usecase
+id: uc
+name: writes only email
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:db/table:users
+    protocol: sql
+dataFlow:
+  - sourceField: Foo.email
+    targetField: users.email

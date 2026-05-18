@@ -1,0 +1,8 @@
+kind: usecase
+id: uc
+name: Minimal valid use case
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:ui/component:Home

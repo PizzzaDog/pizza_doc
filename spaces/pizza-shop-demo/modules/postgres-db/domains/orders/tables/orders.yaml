@@ -1,0 +1,26 @@
+kind: table
+id: orders
+name: orders
+description: One row per placed order; total_cents is the final charged amount.
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: user_id
+    sqlType: uuid
+    foreignKey:
+      table: module:postgres-db/domain:users/table:users
+      column: id
+  - name: status
+    sqlType: varchar(32)
+    description: "TODO: enumerate allowed values (pending/paid/failed/cancelled) — DB enum or free varchar with app-side whitelist?"
+  - name: total_cents
+    sqlType: int
+  - name: stripe_charge_id
+    sqlType: varchar(255)
+    nullable: true
+    description: Populated after a successful Stripe charge; null for failed or not-yet-charged orders.
+  - name: created_at
+    sqlType: timestamptz
+    default: now()
+    description: Non-null; populated server-side (DB DEFAULT now()). Same v0.2 note as users.created_at.

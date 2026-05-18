@@ -1,0 +1,12 @@
+kind: model
+id: OrderResponse
+name: OrderResponse
+modelKind: dto
+description: Response to a successful checkout; minimum info the UI needs to show an order summary.
+fields:
+  - name: orderId
+    type: uuid
+  - name: status
+    type: string
+  - name: totalCents
+    type: int

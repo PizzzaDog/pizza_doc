@@ -1,0 +1,9 @@
+kind: model
+id: User
+name: User
+modelKind: entity
+fields:
+  - name: id
+    type: uuid
+  - name: email
+    type: string

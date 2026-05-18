@@ -1,0 +1,10 @@
+kind: model
+id: UserRecord
+name: UserRecord
+modelKind: entity
+persistedAs: module:db/table:users
+fields:
+  - name: id
+    type: uuid
+  - name: email
+    type: string

@@ -1,0 +1,14 @@
+kind: model
+id: PaymentResult
+name: PaymentResult
+modelKind: dto
+description: Stripe's response reshaped for our use; success=false means the charge was declined.
+fields:
+  - name: success
+    type: boolean
+  - name: chargeId
+    type: string
+    optional: true
+  - name: declineReason
+    type: string
+    optional: true

@@ -1,0 +1,58 @@
+kind: usecase
+id: admin-adds-pizza
+name: Admin adds a pizza to the catalog
+actor: actor:admin
+trigger: Submitting the "Add pizza" form in /admin/menu in web-frontend
+description: Exercises an authorization invariant — the actor must hold the admin role — plus simple validation (name non-empty, price_cents > 0).
+invariants:
+  pre:
+    - The authenticated actor has the admin role
+    - The request body passes server-side validation (name non-empty, priceCents > 0)
+  post:
+    - A new row exists in pizzas with the provided fields and available=true (default from the form)
+steps:
+  - from: module:web-frontend/component:AdminMenuPage
+    to: module:web-frontend/component:menuClient
+    via: module:api-server/domain:menu/model:CreatePizzaRequest
+    protocol: internal-call
+  - from: module:web-frontend/component:menuClient
+    to: module:api-server/domain:menu/component:MenuController
+    via: module:api-server/domain:menu/model:CreatePizzaRequest
+    protocol: http
+    description: POST /api/admin/menu.
+  - from: module:api-server/domain:menu/component:MenuController
+    to: module:api-server/domain:menu/component:MenuService
+    via: module:api-server/domain:menu/model:CreatePizzaRequest
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:MenuService
+    to: module:api-server/domain:menu/component:PizzaRepository
+    via: module:api-server/domain:menu/model:Pizza
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:PizzaRepository
+    to: module:postgres-db/domain:menu/table:pizzas
+    protocol: sql
+    description: INSERT INTO pizzas (id, name, price_cents, available, image_url).
+errorFlows:
+  - id: unauthorized
+    condition: The authenticated actor is not an admin
+    steps:
+      - from: module:api-server/domain:menu/component:MenuController
+        to: module:web-frontend/component:menuClient
+        description: Controller short-circuits with UnauthorizedException before hitting the service.
+    resultDescription: 'Returns 403 Forbidden with { error: "UNAUTHORIZED" }'
+  - id: validation-error
+    condition: Name is empty OR priceCents <= 0
+    steps:
+      - from: module:api-server/domain:menu/component:MenuService
+        to: module:api-server/domain:menu/component:MenuController
+        description: MenuService throws ValidationException before touching the repository.
+    resultDescription: 'Returns 400 Bad Request with { error: "VALIDATION", field: ... }'
+dataFlow:
+  - sourceField: CreatePizzaRequest.name
+    targetField: pizzas.name
+  - sourceField: CreatePizzaRequest.priceCents
+    targetField: pizzas.price_cents
+  - sourceField: CreatePizzaRequest.available
+    targetField: pizzas.available
+  - sourceField: CreatePizzaRequest.imageUrl
+    targetField: pizzas.image_url

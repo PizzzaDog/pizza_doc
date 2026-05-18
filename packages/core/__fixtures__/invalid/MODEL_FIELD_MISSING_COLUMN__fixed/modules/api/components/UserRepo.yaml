@@ -1,0 +1,10 @@
+kind: component
+id: UserRepo
+name: UserRepo
+type: repository
+methods:
+  - name: save
+    params:
+      - name: u
+        type: User
+    returns: void

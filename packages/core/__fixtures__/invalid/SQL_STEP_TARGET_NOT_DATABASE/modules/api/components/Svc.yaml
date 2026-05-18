@@ -1,0 +1,4 @@
+kind: component
+id: Svc
+name: Svc
+type: service

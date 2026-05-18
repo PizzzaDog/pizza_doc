@@ -1,0 +1,11 @@
+kind: usecase
+id: uc
+name: SQL step to a service module
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:api/component:Svc
+    protocol: sql
+  - from: module:api/component:Svc
+    to: module:ui/component:Home

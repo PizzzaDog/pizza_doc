@@ -1,0 +1,29 @@
+kind: component
+id: AuthController
+name: AuthController
+type: controller
+description: HTTP entry point for signup and login.
+methods:
+  - name: signup
+    params:
+      - name: request
+        type: CreateUserRequest
+    returns: RegisterResponse
+    httpMethod: POST
+    httpPath: /api/auth/signup
+    calls:
+      - module:api-server/domain:users/component:UserService/method:create
+    throws:
+      - EmailAlreadyExistsException
+      - WeakPasswordException
+  - name: login
+    params:
+      - name: request
+        type: LoginRequest
+    returns: LoginResponse
+    httpMethod: POST
+    httpPath: /api/auth/login
+    calls:
+      - module:api-server/domain:users/component:UserService/method:authenticate
+    throws:
+      - InvalidCredentialsException

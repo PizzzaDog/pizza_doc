@@ -1,0 +1,5 @@
+kind: actor
+id: admin
+name: Admin
+type: user
+description: Staff user who manages the pizza catalog.

@@ -1,0 +1,10 @@
+kind: table
+id: users
+name: users
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: email
+    sqlType: varchar(255)
+    unique: true

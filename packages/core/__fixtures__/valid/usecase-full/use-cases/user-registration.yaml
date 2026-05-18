@@ -1,0 +1,43 @@
+kind: usecase
+id: user-registration
+name: User registration
+actor: actor:anon
+trigger: Clicking Sign up on /signup
+description: Creates a new user and persists it
+invariants:
+  pre:
+    - No user with this email exists
+  post:
+    - A new row exists in users
+    - password_hash contains a bcrypt hash
+steps:
+  - from: module:web/component:SignupPage
+    to: module:api/domain:users/component:AuthController
+    via: module:api/domain:users/model:CreateUserRequest
+    protocol: http
+    description: POST /api/auth/signup
+  - from: module:api/domain:users/component:AuthController
+    to: module:api/domain:users/component:UserService
+    via: module:api/domain:users/model:CreateUserRequest
+    protocol: internal-call
+  - from: module:api/domain:users/component:UserService
+    to: module:api/domain:users/component:UserRepository
+    protocol: internal-call
+  - from: module:api/domain:users/component:UserRepository
+    to: module:postgres-db/domain:users/table:users
+    protocol: sql
+    description: INSERT INTO users
+errorFlows:
+  - id: email-already-exists
+    condition: User with email exists
+    steps:
+      - from: module:api/domain:users/component:UserRepository
+        to: module:api/domain:users/component:UserService
+        description: Signals duplicate
+    resultDescription: Returns 409 Conflict
+dataFlow:
+  - sourceField: CreateUserRequest.email
+    targetField: users.email
+  - sourceField: CreateUserRequest.password
+    targetField: users.password_hash
+    transform: via PasswordHasher.hash

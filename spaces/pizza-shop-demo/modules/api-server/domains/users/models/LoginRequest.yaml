@@ -1,0 +1,10 @@
+kind: model
+id: LoginRequest
+name: LoginRequest
+modelKind: dto
+description: Request body of POST /api/auth/login.
+fields:
+  - name: email
+    type: string
+  - name: password
+    type: string

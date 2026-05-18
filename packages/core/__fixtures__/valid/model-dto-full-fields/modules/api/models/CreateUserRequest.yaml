@@ -1,0 +1,21 @@
+kind: model
+id: CreateUserRequest
+name: CreateUserRequest
+modelKind: dto
+description: Signup payload
+fields:
+  - name: email
+    type: string
+    description: Must be a valid email
+    example: user@example.com
+  - name: password
+    type: string
+    description: Plaintext, at least 8 chars
+  - name: displayName
+    type: string
+    optional: true
+  - name: preferences
+    type: Map<String, Boolean>
+    optional: true
+    example:
+      darkMode: true

@@ -1,0 +1,4 @@
+kind: actor
+id: sys
+name: System
+type: system

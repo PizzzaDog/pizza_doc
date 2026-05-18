@@ -1,0 +1,8 @@
+- name: local-template
+  direction: outbound
+  protocol: file
+  endpoint: $TEMPLATE_PATH
+  consumer: module:api
+  auth: none
+  preflightCheck:
+    sourceRef: services/api/src/preflight.ts#checkTemplates

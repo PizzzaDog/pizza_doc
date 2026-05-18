@@ -1,0 +1,5 @@
+kind: actor
+id: anonymous-visitor
+name: Anonymous Visitor
+type: user
+description: A site visitor who has not yet registered or logged in.

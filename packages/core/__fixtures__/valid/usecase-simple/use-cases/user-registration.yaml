@@ -1,0 +1,17 @@
+kind: usecase
+id: user-registration
+name: User registration
+actor: actor:anon
+trigger: Clicking Sign up
+steps:
+  - from: module:web/component:SignupPage
+    to: module:api/component:AuthController
+    via: module:api/model:CreateUserRequest
+    protocol: http
+  - from: module:api/component:AuthController
+    to: module:api/component:UserService
+    via: module:api/model:CreateUserRequest
+    protocol: internal-call
+  - from: module:api/component:UserService
+    to: module:api/component:AuthController
+    protocol: internal-call

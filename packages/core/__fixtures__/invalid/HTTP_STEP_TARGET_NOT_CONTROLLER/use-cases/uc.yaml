@@ -1,0 +1,11 @@
+kind: usecase
+id: uc
+name: HTTP points at a plain service
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:api/component:Handler
+    protocol: http
+  - from: module:api/component:Handler
+    to: module:ui/component:Home

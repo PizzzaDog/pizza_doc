@@ -1,0 +1,12 @@
+kind: table
+id: sessions
+name: sessions
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: user_id
+    sqlType: uuid
+    foreignKey:
+      table: module:db/table:users
+      column: id

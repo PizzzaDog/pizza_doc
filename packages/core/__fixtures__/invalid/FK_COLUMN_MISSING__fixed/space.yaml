@@ -1,0 +1,3 @@
+meta:
+  id: FK_COLUMN_MISSING__fixed
+  name: Fixed — foreignKey column exists

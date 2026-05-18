@@ -1,0 +1,3 @@
+meta:
+  id: COMPONENT_UNUSED
+  name: a component is declared but never referenced

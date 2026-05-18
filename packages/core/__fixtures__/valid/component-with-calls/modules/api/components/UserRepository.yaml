@@ -1,0 +1,7 @@
+kind: component
+id: UserRepository
+name: UserRepository
+type: repository
+methods:
+  - name: save
+    returns: void

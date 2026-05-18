@@ -1,0 +1,8 @@
+kind: usecase
+id: uc
+name: User flow starts in frontend
+actor: actor:user
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:ui/component:Home

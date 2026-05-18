@@ -1,0 +1,14 @@
+kind: component
+id: UserService
+name: UserService
+type: service
+methods:
+  - name: create
+    params:
+      - name: req
+        type: CreateUserRequest
+    returns: UserResponse
+    calls:
+      - module:api/component:UserRepository/method:insert
+    throws:
+      - ConflictError

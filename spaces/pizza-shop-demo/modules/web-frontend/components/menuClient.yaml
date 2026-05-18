@@ -1,0 +1,25 @@
+kind: component
+id: menuClient
+name: menuClient
+type: client
+description: HTTP client for /api/menu/* and /api/admin/menu/*.
+methods:
+  - name: list
+    returns: PizzaListResponse
+    httpMethod: GET
+    httpPath: /api/menu
+  - name: create
+    params:
+      - name: request
+        type: CreatePizzaRequest
+    returns: Pizza
+    httpMethod: POST
+    httpPath: /api/admin/menu
+  - name: update
+    params:
+      - name: request
+        type: UpdatePizzaRequest
+    returns: Pizza
+    httpMethod: PATCH
+    httpPath: /api/admin/menu/{id}
+    description: "TODO: pizza id is in the URL path, not the body — do we want a separate {id, request} param shape to make that explicit?"

@@ -1,0 +1,12 @@
+kind: component
+id: InternalController
+name: InternalController
+type: controller
+entrypoint:
+  kind: framework-entrypoint
+  reason: Mounted by framework router.
+methods:
+  - name: probe
+    returns: void
+    httpMethod: GET
+    httpPath: /internal/probe

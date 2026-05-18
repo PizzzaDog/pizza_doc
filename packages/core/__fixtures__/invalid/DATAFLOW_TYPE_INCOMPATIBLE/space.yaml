@@ -1,0 +1,3 @@
+meta:
+  id: DATAFLOW_TYPE_INCOMPATIBLE
+  name: int field mapped to varchar column

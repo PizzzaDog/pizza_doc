@@ -1,0 +1,14 @@
+kind: table
+id: users
+name: users
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: email
+    sqlType: varchar(255)
+    unique: true
+indexes:
+  - name: idx_users_email
+    columns: [email]
+    unique: true

@@ -1,0 +1,4 @@
+kind: component
+id: Callee
+name: Callee
+type: service

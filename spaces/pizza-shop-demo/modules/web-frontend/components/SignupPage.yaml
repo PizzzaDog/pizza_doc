@@ -1,0 +1,14 @@
+kind: component
+id: SignupPage
+name: SignupPage
+type: page
+description: Signup form at /signup that captures email, password, and optional display name.
+methods:
+  - name: submit
+    params:
+      - name: form
+        type: CreateUserRequest
+    returns: void
+    calls:
+      - module:web-frontend/component:authClient/method:signup
+    description: Invoked by the form's onSubmit; delegates the HTTP call to authClient.

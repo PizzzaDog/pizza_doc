@@ -1,0 +1,16 @@
+kind: component
+id: OrderRepository
+name: OrderRepository
+type: repository
+description: Persists orders and their line items; save is transactional across orders and order_items.
+methods:
+  - name: save
+    params:
+      - name: order
+        type: Order
+    returns: Order
+  - name: findByUser
+    params:
+      - name: userId
+        type: uuid
+    returns: List<Order>

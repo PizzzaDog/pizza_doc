@@ -1,0 +1,10 @@
+kind: component
+id: ErrorHandler
+name: ErrorHandler
+type: middleware
+methods:
+  - name: handleConflict
+    params:
+      - name: err
+        type: ConflictError
+    returns: ErrorResponse

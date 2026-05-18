@@ -1,0 +1,6 @@
+kind: module
+id: web-frontend
+name: Web Frontend
+type: frontend
+techStack: React 19 + TypeScript + Vite
+description: Customer-facing and admin-facing SPA that talks to api-server over HTTP.

@@ -1,0 +1,10 @@
+kind: usecase
+id: uc
+name: Chain discontinuity
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:api/component:Service
+  - from: module:ui/component:Widget
+    to: module:ui/component:Home

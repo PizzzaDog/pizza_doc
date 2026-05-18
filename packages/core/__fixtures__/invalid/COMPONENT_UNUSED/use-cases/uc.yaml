@@ -1,0 +1,10 @@
+kind: usecase
+id: uc
+name: only uses Used
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:api/component:Used
+  - from: module:api/component:Used
+    to: module:ui/component:Home

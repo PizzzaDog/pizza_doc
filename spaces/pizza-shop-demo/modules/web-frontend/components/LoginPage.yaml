@@ -1,0 +1,13 @@
+kind: component
+id: LoginPage
+name: LoginPage
+type: page
+description: Login form at /login; on success, stores the returned session token in an HTTP-only cookie.
+methods:
+  - name: submit
+    params:
+      - name: form
+        type: LoginRequest
+    returns: void
+    calls:
+      - module:web-frontend/component:authClient/method:login

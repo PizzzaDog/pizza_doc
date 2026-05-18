@@ -1,0 +1,9 @@
+kind: component
+id: Caller
+name: Caller
+type: service
+methods:
+  - name: doIt
+    returns: void
+    calls:
+      - module:api/component:Callee/method:missing

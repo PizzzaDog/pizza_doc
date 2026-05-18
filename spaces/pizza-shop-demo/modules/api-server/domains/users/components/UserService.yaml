@@ -1,0 +1,31 @@
+kind: component
+id: UserService
+name: UserService
+type: service
+description: Owns user-lifecycle invariants — unique email on create, password policy, and credentials check on login.
+methods:
+  - name: create
+    params:
+      - name: request
+        type: CreateUserRequest
+    returns: User
+    calls:
+      - module:api-server/domain:users/component:UserRepository/method:findByEmail
+      - module:api-server/domain:users/component:PasswordHasher/method:hash
+      - module:api-server/domain:users/component:UserRepository/method:save
+    throws:
+      - EmailAlreadyExistsException
+      - WeakPasswordException
+    description: Rejects duplicates via findByEmail, hashes the password, then persists the row.
+  - name: authenticate
+    params:
+      - name: request
+        type: LoginRequest
+    returns: SessionToken
+    calls:
+      - module:api-server/domain:users/component:UserRepository/method:findByEmail
+      - module:api-server/domain:users/component:PasswordHasher/method:verify
+      - module:api-server/domain:users/component:SessionTokenService/method:issue
+    throws:
+      - InvalidCredentialsException
+    description: Verifies credentials and delegates token issuance; the controller layer turns the SessionToken into an HTTP cookie.

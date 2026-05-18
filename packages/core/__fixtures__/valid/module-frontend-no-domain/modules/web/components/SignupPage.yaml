@@ -1,0 +1,8 @@
+kind: component
+id: SignupPage
+name: SignupPage
+type: page
+description: Sign-up screen
+methods:
+  - name: submit
+    returns: void

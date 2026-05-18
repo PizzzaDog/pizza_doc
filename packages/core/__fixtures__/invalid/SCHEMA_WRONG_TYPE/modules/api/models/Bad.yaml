@@ -1,0 +1,5 @@
+kind: model
+id: Bad
+name: Bad
+modelKind: dto
+fields: "should-be-array-not-string"

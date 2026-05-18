@@ -1,0 +1,15 @@
+kind: component
+id: PaymentGateway
+name: PaymentGateway
+type: infrastructure
+description: Thin wrapper around StripeAPI; translates our PaymentRequest into Stripe's schema and back.
+methods:
+  - name: charge
+    params:
+      - name: request
+        type: PaymentRequest
+    returns: PaymentResult
+    calls:
+      - module:stripe/component:StripeAPI/method:createCharge
+    throws:
+      - StripeDeclinedException

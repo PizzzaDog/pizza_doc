@@ -1,0 +1,10 @@
+kind: model
+id: ErrorResponse
+name: ErrorResponse
+modelKind: dto
+fields:
+  - name: code
+    type: string
+readiness:
+  orphan:
+    reason: Returned only by framework-level error handling documented in module.errorMapping.

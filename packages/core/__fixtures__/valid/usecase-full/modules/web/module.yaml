@@ -1,0 +1,4 @@
+kind: module
+id: web
+name: Web
+type: frontend

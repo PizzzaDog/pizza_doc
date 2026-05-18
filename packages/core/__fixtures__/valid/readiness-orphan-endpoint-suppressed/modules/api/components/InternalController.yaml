@@ -1,0 +1,15 @@
+kind: component
+id: InternalController
+name: InternalController
+type: controller
+entrypoint:
+  kind: framework-entrypoint
+  reason: Mounted by framework router outside modeled product flows.
+methods:
+  - name: probe
+    returns: void
+    httpMethod: GET
+    httpPath: /internal/probe
+    readiness:
+      orphan:
+        reason: Operator-only endpoint covered by deploy smoke tests outside product use cases.

@@ -1,0 +1,3 @@
+meta:
+  id: DATAFLOW_UNUSED_DTO_FIELD
+  name: DTO has a required field that never reaches a column

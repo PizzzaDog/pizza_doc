@@ -1,0 +1,4 @@
+kind: component
+id: Handler
+name: Handler
+type: service

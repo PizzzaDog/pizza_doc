@@ -1,0 +1,8 @@
+kind: model
+id: PizzaListResponse
+name: PizzaListResponse
+modelKind: dto
+description: Response body of GET /api/menu; a flat list of pizzas.
+fields:
+  - name: pizzas
+    type: List<Pizza>

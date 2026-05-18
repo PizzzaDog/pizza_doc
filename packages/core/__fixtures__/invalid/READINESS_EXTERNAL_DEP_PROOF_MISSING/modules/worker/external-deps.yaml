@@ -1,0 +1,6 @@
+- name: local-artifact
+  direction: outbound
+  protocol: file
+  endpoint: $LOCAL_ARTIFACT_PATH
+  consumer: module:worker
+  auth: none

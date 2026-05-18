@@ -1,0 +1,9 @@
+kind: model
+id: Foo
+name: Foo
+modelKind: dto
+fields:
+  - name: email
+    type: string
+  - name: passwordHash
+    type: string

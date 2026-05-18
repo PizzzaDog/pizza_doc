@@ -1,0 +1,19 @@
+kind: model
+id: User
+name: User
+modelKind: entity
+persistedAs: module:postgres-db/domain:users/table:users
+description: Domain entity for a registered user; maps one-to-one to the users table.
+fields:
+  - name: id
+    type: uuid
+  - name: email
+    type: string
+  - name: passwordHash
+    type: string
+  - name: displayName
+    type: string
+    optional: true
+  - name: createdAt
+    type: timestamp
+    optional: true

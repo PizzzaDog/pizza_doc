@@ -1,0 +1,4 @@
+kind: actor
+id: bad
+name: Bad actor
+type: user

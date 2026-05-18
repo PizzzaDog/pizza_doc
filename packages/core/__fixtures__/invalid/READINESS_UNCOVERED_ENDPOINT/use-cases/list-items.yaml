@@ -1,0 +1,14 @@
+kind: usecase
+id: list-items
+name: List items
+actor: actor:client
+trigger: Client opens the items page
+steps:
+  - from: module:web/component:ItemsPage
+    to: module:api/component:PublicController
+    protocol: http
+    description: GET /items
+  - from: module:api/component:PublicController
+    to: module:web/component:ItemsPage
+    protocol: http-response
+    description: 200 OK

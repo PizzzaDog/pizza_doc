@@ -1,0 +1,14 @@
+kind: component
+id: AuthController
+name: AuthController
+type: controller
+methods:
+  - name: create
+    params:
+      - name: req
+        type: CreateUserRequest
+    returns: UserResponse
+    calls:
+      - module:api/component:UserService/method:create
+    httpMethod: POST
+    httpPath: /users

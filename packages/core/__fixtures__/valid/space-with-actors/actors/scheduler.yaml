@@ -1,0 +1,4 @@
+kind: actor
+id: scheduler
+name: Nightly scheduler
+type: scheduler

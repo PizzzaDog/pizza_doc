@@ -1,0 +1,5 @@
+meta:
+  id: READINESS_UNCOVERED_ENDPOINT
+  name: Readiness Uncovered Endpoint
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

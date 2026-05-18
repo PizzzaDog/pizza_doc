@@ -1,0 +1,4 @@
+kind: module
+id: wrong-name
+name: Wrong
+type: service

@@ -1,0 +1,10 @@
+kind: usecase
+id: uc
+name: Continuous chain
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:ui/component:Home
+    to: module:api/component:Service
+  - from: module:api/component:Service
+    to: module:ui/component:Home

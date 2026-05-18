@@ -1,0 +1,6 @@
+kind: usecase
+id: uc
+name: Empty use case
+actor: actor:sys
+trigger: cron
+steps: []

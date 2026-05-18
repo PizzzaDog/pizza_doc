@@ -1,0 +1,5 @@
+kind: module
+id: postgres-db
+name: Postgres
+type: database
+techStack: PostgreSQL 16

@@ -1,0 +1,8 @@
+kind: model
+id: Typo
+name: Typo
+modelKind: dto
+fields:
+  - name: email
+    type: string
+    optinal: true

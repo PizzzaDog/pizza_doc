@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.task }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [biome, typecheck, test, build, impeccable, spaces]
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm version is read from `packageManager` in package.json
+      # (single source of truth; corepack uses the same field locally).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Core has to be built before anything depending on its published
+      # output (web, cli) can typecheck.
+      - name: Build @pizza-doc/core
+        if: matrix.task != 'biome'
+        run: pnpm --filter @pizza-doc/core build
+
+      - name: Biome check
+        if: matrix.task == 'biome'
+        run: pnpm check
+
+      - name: Typecheck
+        if: matrix.task == 'typecheck'
+        run: pnpm typecheck
+
+      - name: Tests
+        if: matrix.task == 'test'
+        run: pnpm test
+
+      - name: Build (packages + docs site)
+        if: matrix.task == 'build'
+        run: |
+          pnpm build
+          pnpm --filter pizza-doc-site build
+
+      - name: Impeccable
+        if: matrix.task == 'impeccable'
+        run: pnpm detect-slop
+
+      # Validate release-demo spaces with the full CLI gate stack:
+      # validate (0 errors, no warnings) + coverage thresholds + no orphan
+      # endpoints. Raw/regeneration samples under spaces/ are intentionally
+      # not release gates.
+      - name: Spaces quality gates
+        if: matrix.task == 'spaces'
+        run: |
+          pnpm --filter @pizza-doc/cli build
+          failed=0
+          for id in pizza-shop-demo; do
+            echo "::group::${id}"
+            pnpm pd validate "spaces/${id}" --strict-warnings || failed=1
+            pnpm pd coverage "spaces/${id}" || failed=1
+            pnpm pd endpoints "spaces/${id}" --orphans || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed

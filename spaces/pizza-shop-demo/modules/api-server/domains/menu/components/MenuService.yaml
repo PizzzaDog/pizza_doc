@@ -1,0 +1,30 @@
+kind: component
+id: MenuService
+name: MenuService
+type: service
+description: Menu business logic; admin-supplied fields are validated here before hitting the repository.
+methods:
+  - name: list
+    returns: PizzaListResponse
+    calls:
+      - module:api-server/domain:menu/component:PizzaRepository/method:findAvailable
+    description: Calls findAvailable (which pushes the available=true filter into the repository), then wraps the List<Pizza> into PizzaListResponse.
+  - name: add
+    params:
+      - name: request
+        type: CreatePizzaRequest
+    returns: Pizza
+    calls:
+      - module:api-server/domain:menu/component:PizzaRepository/method:save
+    throws:
+      - ValidationException
+  - name: update
+    params:
+      - name: request
+        type: UpdatePizzaRequest
+    returns: Pizza
+    calls:
+      - module:api-server/domain:menu/component:PizzaRepository/method:findById
+      - module:api-server/domain:menu/component:PizzaRepository/method:save
+    throws:
+      - ValidationException

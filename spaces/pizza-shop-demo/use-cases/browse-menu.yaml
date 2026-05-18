@@ -1,0 +1,29 @@
+kind: usecase
+id: browse-menu
+name: Customer browses the menu
+actor: actor:customer
+trigger: Navigating to /menu in web-frontend
+description: Read-only flow. Cacheable end-to-end — both MenuService (in-process) and HTTP response (Cache-Control) can cache. Page 08 calls this the "caching implications" showcase.
+invariants:
+  pre:
+    - No pre-conditions beyond a working DB connection
+  post:
+    - The UI displays a list of currently-available pizzas
+steps:
+  - from: module:web-frontend/component:MenuPage
+    to: module:web-frontend/component:menuClient
+    protocol: internal-call
+  - from: module:web-frontend/component:menuClient
+    to: module:api-server/domain:menu/component:MenuController
+    protocol: http
+    description: GET /api/menu.
+  - from: module:api-server/domain:menu/component:MenuController
+    to: module:api-server/domain:menu/component:MenuService
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:MenuService
+    to: module:api-server/domain:menu/component:PizzaRepository
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:PizzaRepository
+    to: module:postgres-db/domain:menu/table:pizzas
+    protocol: sql
+    description: SELECT * FROM pizzas WHERE available = true.

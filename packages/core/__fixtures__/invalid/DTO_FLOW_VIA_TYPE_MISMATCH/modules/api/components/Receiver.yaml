@@ -1,0 +1,10 @@
+kind: component
+id: Receiver
+name: Receiver
+type: service
+methods:
+  - name: accept
+    params:
+      - name: input
+        type: A
+    returns: void

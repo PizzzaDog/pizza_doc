@@ -1,0 +1,11 @@
+kind: component
+id: AppRoot
+name: AppRoot
+type: service
+entrypoint:
+  kind: composition-root
+  reason: Started by the application bootstrap and owns service wiring.
+  sourceRef: services/api/src/main.ts:12
+composes:
+  - module:api/component:AuthController
+  - module:api/component:ErrorHandler

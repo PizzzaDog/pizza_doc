@@ -1,0 +1,4 @@
+kind: actor
+id: client
+name: Client
+type: user

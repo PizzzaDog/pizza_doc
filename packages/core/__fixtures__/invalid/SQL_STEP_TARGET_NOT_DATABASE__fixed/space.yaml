@@ -1,0 +1,3 @@
+meta:
+  id: SQL_STEP_TARGET_NOT_DATABASE__fixed
+  name: Fixed — SQL step targets a database table

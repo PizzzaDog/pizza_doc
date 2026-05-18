@@ -1,0 +1,20 @@
+kind: component
+id: authClient
+name: authClient
+type: client
+description: HTTP client for /api/auth/*; uses fetch + JSON.
+methods:
+  - name: signup
+    params:
+      - name: request
+        type: CreateUserRequest
+    returns: RegisterResponse
+    httpMethod: POST
+    httpPath: /api/auth/signup
+  - name: login
+    params:
+      - name: request
+        type: LoginRequest
+    returns: LoginResponse
+    httpMethod: POST
+    httpPath: /api/auth/login

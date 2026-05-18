@@ -1,0 +1,3 @@
+meta:
+  id: DUPLICATE_ID
+  name: two components with the same id in the same scope

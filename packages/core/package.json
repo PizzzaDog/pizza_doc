@@ -1,0 +1,50 @@
+{
+  "name": "@pizza-doc/core",
+  "version": "0.5.1",
+  "description": "Schemas, loader, validator, serializer, and AI exporter for Pizza Doc.",
+  "license": "MIT",
+  "homepage": "https://github.com/PizzzaDog/pizza_doc",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PizzzaDog/pizza_doc.git",
+    "directory": "packages/core"
+  },
+  "keywords": ["architecture", "yaml", "validator", "pizza-doc"],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node-io": {
+      "types": "./dist/node-io.d.ts",
+      "import": "./dist/node-io.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4",
+    "yaml": "2.6.0"
+  },
+  "dependencies": {
+    "zod": "3.23.8"
+  }
+}

@@ -1,0 +1,19 @@
+kind: component
+id: PizzaRepository
+name: PizzaRepository
+type: repository
+description: Persistence for the pizzas table.
+methods:
+  - name: findAvailable
+    returns: List<Pizza>
+    description: Returns entities; MenuService wraps the list into PizzaListResponse.
+  - name: findById
+    params:
+      - name: id
+        type: uuid
+    returns: Optional<Pizza>
+  - name: save
+    params:
+      - name: pizza
+        type: Pizza
+    returns: Pizza

@@ -1,0 +1,12 @@
+kind: model
+id: PaymentRequest
+name: PaymentRequest
+modelKind: dto
+description: What PaymentGateway sends to Stripe; amount is in cents to match Stripe's API.
+fields:
+  - name: orderId
+    type: uuid
+  - name: amountCents
+    type: int
+  - name: sourceToken
+    type: string

@@ -1,0 +1,7 @@
+kind: component
+id: Callee
+name: Callee
+type: service
+methods:
+  - name: existing
+    returns: void

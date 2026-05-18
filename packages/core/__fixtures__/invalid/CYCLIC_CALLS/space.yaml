@@ -1,0 +1,3 @@
+meta:
+  id: CYCLIC_CALLS
+  name: A.foo and B.bar call each other

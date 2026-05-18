@@ -1,0 +1,34 @@
+kind: usecase
+id: create-user
+name: Create user
+actor: actor:customer
+trigger: Customer submits signup form
+steps:
+  - from: module:web/component:SignupPage
+    to: module:api/component:AuthController
+    via: module:api/model:CreateUserRequest
+    protocol: http
+    description: POST /users
+  - from: module:api/component:AuthController
+    to: module:api/component:UserService
+    via: module:api/model:CreateUserRequest
+    protocol: internal-call
+  - from: module:api/component:UserService
+    to: module:api/component:UserRepository
+    protocol: internal-call
+  - from: module:api/component:UserRepository
+    to: module:db/table:users
+    protocol: sql
+    description: INSERT INTO users
+errorFlows:
+  - id: duplicate
+    condition: Email already exists
+    steps:
+      - from: module:api/component:UserRepository
+        to: module:api/component:UserService
+        protocol: internal-call
+        description: Raises ConflictError
+    resultDescription: Returns 409 Conflict through ErrorHandler
+dataFlow:
+  - sourceField: CreateUserRequest.email
+    targetField: users.email

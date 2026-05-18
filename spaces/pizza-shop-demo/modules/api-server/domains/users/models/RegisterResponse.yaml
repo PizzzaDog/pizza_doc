@@ -1,0 +1,10 @@
+kind: model
+id: RegisterResponse
+name: RegisterResponse
+modelKind: dto
+description: Response to a successful signup; does not include a session — the client must follow up with /login.
+fields:
+  - name: userId
+    type: uuid
+  - name: email
+    type: string

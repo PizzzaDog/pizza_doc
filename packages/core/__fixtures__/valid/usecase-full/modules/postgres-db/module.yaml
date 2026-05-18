@@ -1,0 +1,4 @@
+kind: module
+id: postgres-db
+name: Postgres
+type: database

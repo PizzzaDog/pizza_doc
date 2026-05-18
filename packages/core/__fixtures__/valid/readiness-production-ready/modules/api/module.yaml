@@ -1,0 +1,9 @@
+kind: module
+id: api
+name: API
+type: service
+errorMapping:
+  - exception: ConflictError
+    httpStatus: 409
+    code: CONFLICT
+    handlerRef: module:api/component:ErrorHandler/method:handleConflict

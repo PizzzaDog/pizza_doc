@@ -1,0 +1,3 @@
+meta:
+  id: HTTP_STEP_TARGET_NOT_CONTROLLER__fixed
+  name: Fixed — HTTP step points at a controller

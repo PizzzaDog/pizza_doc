@@ -1,0 +1,7 @@
+kind: component
+id: B
+name: B
+type: service
+methods:
+  - name: bar
+    returns: void

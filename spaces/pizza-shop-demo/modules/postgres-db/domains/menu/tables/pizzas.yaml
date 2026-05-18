@@ -1,0 +1,22 @@
+kind: table
+id: pizzas
+name: pizzas
+description: Menu items; price_cents is stored as integer cents to avoid floating-point rounding.
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: name
+    sqlType: varchar(100)
+  - name: price_cents
+    sqlType: int
+  - name: available
+    sqlType: boolean
+    description: Soft-delete flag; admins toggle this instead of removing rows so historical orders keep referring to real pizzas.
+  - name: image_url
+    sqlType: varchar(500)
+    nullable: true
+  - name: created_at
+    sqlType: timestamptz
+    default: now()
+    description: Non-null; populated server-side (DB DEFAULT now()). Same v0.2 note as users.created_at.

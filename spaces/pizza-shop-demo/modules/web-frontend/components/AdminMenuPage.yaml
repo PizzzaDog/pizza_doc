@@ -1,0 +1,20 @@
+kind: component
+id: AdminMenuPage
+name: AdminMenuPage
+type: page
+description: /admin/menu — admin-only CRUD over the pizza catalog.
+methods:
+  - name: addPizza
+    params:
+      - name: request
+        type: CreatePizzaRequest
+    returns: void
+    calls:
+      - module:web-frontend/component:menuClient/method:create
+  - name: updatePizza
+    params:
+      - name: request
+        type: UpdatePizzaRequest
+    returns: void
+    calls:
+      - module:web-frontend/component:menuClient/method:update

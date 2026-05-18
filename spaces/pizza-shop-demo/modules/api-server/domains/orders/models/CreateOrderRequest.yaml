@@ -1,0 +1,12 @@
+kind: model
+id: CreateOrderRequest
+name: CreateOrderRequest
+modelKind: dto
+description: Customer checkout payload; items is a list of {pizzaId, quantity}.
+fields:
+  - name: items
+    type: List<CreateOrderItemRequest>
+    description: Line items as sent by the client. Server re-prices each from the current pizzas.price_cents at order time.
+  - name: sourceToken
+    type: string
+    description: Stripe payment-method token captured by Stripe.js on the client.

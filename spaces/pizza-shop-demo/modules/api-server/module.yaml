@@ -1,0 +1,6 @@
+kind: module
+id: api-server
+name: API Server
+type: service
+techStack: Spring Boot 3 + Java 21
+description: Backend service that owns authentication, menu, and order processing; persists to postgres-db.

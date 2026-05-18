@@ -1,0 +1,55 @@
+kind: usecase
+id: admin-updates-pizza
+name: Admin updates a pizza
+actor: actor:admin
+trigger: Submitting the "Edit pizza" form in /admin/menu in web-frontend
+description: Covers the admin PATCH endpoint for changing catalog details without deleting historical pizza references.
+invariants:
+  pre:
+    - The authenticated actor has the admin role
+    - The target pizza id exists
+    - The request body passes server-side validation
+  post:
+    - The pizzas row has the updated name, price, availability, and image URL
+steps:
+  - from: module:web-frontend/component:AdminMenuPage
+    to: module:web-frontend/component:menuClient
+    via: module:api-server/domain:menu/model:UpdatePizzaRequest
+    protocol: internal-call
+  - from: module:web-frontend/component:menuClient
+    to: module:api-server/domain:menu/component:MenuController
+    via: module:api-server/domain:menu/model:UpdatePizzaRequest
+    protocol: http
+    description: PATCH /api/admin/menu/{id}.
+  - from: module:api-server/domain:menu/component:MenuController
+    to: module:api-server/domain:menu/component:MenuService
+    via: module:api-server/domain:menu/model:UpdatePizzaRequest
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:MenuService
+    to: module:api-server/domain:menu/component:PizzaRepository
+    via: module:api-server/domain:menu/model:Pizza
+    protocol: internal-call
+  - from: module:api-server/domain:menu/component:PizzaRepository
+    to: module:postgres-db/domain:menu/table:pizzas
+    protocol: sql
+    description: UPDATE pizzas SET name, price_cents, available, image_url WHERE id = ?.
+errorFlows:
+  - id: pizza-not-found
+    condition: The target pizza id does not exist
+    steps:
+      - from: module:api-server/domain:menu/component:PizzaRepository
+        to: module:api-server/domain:menu/component:MenuService
+        description: Repository returns empty; MenuService throws NotFoundException.
+      - from: module:api-server/domain:menu/component:MenuService
+        to: module:api-server/domain:menu/component:MenuController
+        description: Controller maps the exception to a 404 response.
+    resultDescription: 'Returns 404 Not Found with { error: "PIZZA_NOT_FOUND" }'
+dataFlow:
+  - sourceField: UpdatePizzaRequest.name
+    targetField: pizzas.name
+  - sourceField: UpdatePizzaRequest.priceCents
+    targetField: pizzas.price_cents
+  - sourceField: UpdatePizzaRequest.available
+    targetField: pizzas.available
+  - sourceField: UpdatePizzaRequest.imageUrl
+    targetField: pizzas.image_url

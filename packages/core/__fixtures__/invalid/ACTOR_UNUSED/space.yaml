@@ -1,0 +1,3 @@
+meta:
+  id: ACTOR_UNUSED
+  name: an actor is declared but no use case references it

@@ -1,0 +1,22 @@
+kind: model
+id: Order
+name: Order
+modelKind: entity
+persistedAs: module:postgres-db/domain:orders/table:orders
+description: The persisted order aggregate. Items are embedded for simplicity; real projects may split into Order (persisted) + OrderAggregate (projected with items joined from order_items).
+fields:
+  - name: id
+    type: uuid
+  - name: userId
+    type: uuid
+  - name: status
+    type: string
+  - name: totalCents
+    type: int
+  - name: items
+    type: List<OrderItem>
+    persisted: false
+    description: Aggregate embedding; joined from order_items, not stored on the orders row itself.
+  - name: stripeChargeId
+    type: string
+    optional: true

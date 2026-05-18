@@ -1,0 +1,18 @@
+kind: component
+id: SessionTokenService
+name: SessionTokenService
+type: infrastructure
+description: Mints new session tokens, persists them to the sessions table, and validates incoming tokens.
+methods:
+  - name: issue
+    params:
+      - name: userId
+        type: uuid
+    returns: SessionToken
+    description: Generates a random token and writes a row into sessions with expires_at = now + 7d.
+  - name: validate
+    params:
+      - name: token
+        type: string
+    returns: uuid
+    description: Returns the userId if the token exists and is not expired; throws InvalidCredentialsException otherwise.

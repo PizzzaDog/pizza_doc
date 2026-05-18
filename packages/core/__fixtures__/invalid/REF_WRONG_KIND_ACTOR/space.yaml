@@ -1,0 +1,3 @@
+meta:
+  id: REF_WRONG_KIND_ACTOR
+  name: usecase.actor points at a component instead of an actor

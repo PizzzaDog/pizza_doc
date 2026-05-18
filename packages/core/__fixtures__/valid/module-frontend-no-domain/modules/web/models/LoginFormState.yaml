@@ -1,0 +1,9 @@
+kind: model
+id: LoginFormState
+name: LoginFormState
+modelKind: value-object
+fields:
+  - name: email
+    type: string
+  - name: password
+    type: string

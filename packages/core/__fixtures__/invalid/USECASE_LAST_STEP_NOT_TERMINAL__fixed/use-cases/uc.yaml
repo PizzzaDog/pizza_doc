@@ -1,0 +1,8 @@
+kind: usecase
+id: uc
+name: Terminal last step
+actor: actor:sys
+trigger: cron
+steps:
+  - from: module:api/component:Foo
+    to: module:ui/component:Home

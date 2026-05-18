@@ -1,0 +1,6 @@
+kind: module
+id: stripe
+name: Stripe
+type: external
+techStack: Stripe REST API
+description: External payment provider; the only path through which money leaves the system.

@@ -1,0 +1,36 @@
+kind: component
+id: MenuController
+name: MenuController
+type: controller
+description: HTTP entry point for the public menu and the admin CRUD endpoints.
+methods:
+  - name: list
+    returns: PizzaListResponse
+    httpMethod: GET
+    httpPath: /api/menu
+    calls:
+      - module:api-server/domain:menu/component:MenuService/method:list
+  - name: create
+    params:
+      - name: request
+        type: CreatePizzaRequest
+    returns: Pizza
+    httpMethod: POST
+    httpPath: /api/admin/menu
+    calls:
+      - module:api-server/domain:menu/component:MenuService/method:add
+    throws:
+      - UnauthorizedException
+      - ValidationException
+  - name: update
+    params:
+      - name: request
+        type: UpdatePizzaRequest
+    returns: Pizza
+    httpMethod: PATCH
+    httpPath: /api/admin/menu/{id}
+    calls:
+      - module:api-server/domain:menu/component:MenuService/method:update
+    throws:
+      - UnauthorizedException
+      - ValidationException

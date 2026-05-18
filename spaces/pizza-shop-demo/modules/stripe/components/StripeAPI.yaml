@@ -1,0 +1,14 @@
+kind: component
+id: StripeAPI
+name: StripeAPI
+type: client
+description: External REST client; only createCharge is modeled — other endpoints aren't in our critical path.
+methods:
+  - name: createCharge
+    params:
+      - name: request
+        type: PaymentRequest
+    returns: PaymentResult
+    httpMethod: POST
+    httpPath: /v1/charges
+    description: Stripe's real API also takes a currency field; omitted here for demo simplicity. A real integration would include it on PaymentRequest.

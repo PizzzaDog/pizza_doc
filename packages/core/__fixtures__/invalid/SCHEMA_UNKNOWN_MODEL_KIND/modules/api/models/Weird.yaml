@@ -1,0 +1,5 @@
+kind: model
+id: Weird
+name: Weird
+modelKind: protobuf
+fields: []

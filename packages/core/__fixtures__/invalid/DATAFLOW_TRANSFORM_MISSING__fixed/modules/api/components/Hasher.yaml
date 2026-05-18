@@ -1,0 +1,10 @@
+kind: component
+id: Hasher
+name: Hasher
+type: infrastructure
+methods:
+  - name: hash
+    params:
+      - name: input
+        type: string
+    returns: string

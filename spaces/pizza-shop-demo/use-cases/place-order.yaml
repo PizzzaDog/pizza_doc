@@ -1,0 +1,98 @@
+kind: usecase
+id: place-order
+name: Customer places an order
+actor: actor:customer
+trigger: Submitting the checkout form on /cart in web-frontend
+description: The cross-module showcase. Involves frontend, service, DB, and an external payment provider; demonstrates field-level dataFlow across many destinations.
+invariants:
+  pre:
+    - Every pizzaId in the request corresponds to an existing pizza with available=true
+    - The provided sourceToken is a valid Stripe payment-method token
+  post:
+    - On success, orders has one new row with status='paid' and a non-null stripe_charge_id
+    - On success, order_items has one row per line item, each with unit_price_cents snapshotted from pizzas.price_cents at order time
+    - On Stripe decline, no rows are persisted to orders or order_items
+steps:
+  - from: module:web-frontend/component:CartPage
+    to: module:web-frontend/component:orderClient
+    via: module:api-server/domain:orders/model:CreateOrderRequest
+    protocol: internal-call
+  - from: module:web-frontend/component:orderClient
+    to: module:api-server/domain:orders/component:OrderController
+    via: module:api-server/domain:orders/model:CreateOrderRequest
+    protocol: http
+    description: POST /api/orders.
+  - from: module:api-server/domain:orders/component:OrderController
+    to: module:api-server/domain:orders/component:OrderService
+    via: module:api-server/domain:orders/model:CreateOrderRequest
+    protocol: internal-call
+  - from: module:api-server/domain:orders/component:OrderService
+    to: module:api-server/domain:menu/component:PizzaRepository
+    protocol: internal-call
+    description: For each item, findById to confirm availability and read current price_cents.
+  - from: module:api-server/domain:menu/component:PizzaRepository
+    to: module:postgres-db/domain:menu/table:pizzas
+    protocol: sql
+    description: SELECT id, price_cents, available FROM pizzas WHERE id = ?.
+  - from: module:api-server/domain:orders/component:OrderService
+    to: module:api-server/domain:orders/component:PaymentGateway
+    via: module:api-server/domain:orders/model:PaymentRequest
+    protocol: internal-call
+    description: Charge the computed total.
+  - from: module:api-server/domain:orders/component:PaymentGateway
+    to: module:stripe/component:StripeAPI
+    via: module:api-server/domain:orders/model:PaymentRequest
+    protocol: external-api
+    description: POST /v1/charges to Stripe.
+  - from: module:api-server/domain:orders/component:OrderService
+    to: module:api-server/domain:orders/component:OrderRepository
+    via: module:api-server/domain:orders/model:Order
+    protocol: internal-call
+    description: After a successful charge, persist the order aggregate.
+  - from: module:api-server/domain:orders/component:OrderRepository
+    to: module:postgres-db/domain:orders/table:orders
+    protocol: sql
+    description: INSERT INTO orders.
+  - from: module:api-server/domain:orders/component:OrderRepository
+    to: module:postgres-db/domain:orders/table:order_items
+    protocol: sql
+    description: INSERT INTO order_items, one row per line item, inside the same transaction.
+errorFlows:
+  - id: stripe-declined
+    condition: StripeAPI.createCharge returns success=false
+    steps:
+      - from: module:api-server/domain:orders/component:PaymentGateway
+        to: module:api-server/domain:orders/component:OrderService
+        description: PaymentGateway throws StripeDeclinedException; OrderService skips persist.
+      - from: module:api-server/domain:orders/component:OrderService
+        to: module:api-server/domain:orders/component:OrderController
+        description: Propagates to the controller.
+    resultDescription: 'Returns 402 Payment Required with { error: "STRIPE_DECLINED", reason: ... }'
+  - id: out-of-stock
+    condition: At least one pizzaId resolves to a pizza with available=false or missing
+    steps:
+      - from: module:api-server/domain:orders/component:OrderService
+        to: module:api-server/domain:orders/component:OrderController
+        description: OrderService throws OutOfStockException before any charge.
+    resultDescription: 'Returns 409 Conflict with { error: "OUT_OF_STOCK", pizzaIds: [...] }'
+dataFlow:
+  - sourceField: CreateOrderRequest.sourceToken
+    targetField: orders.stripe_charge_id
+    transform: via StripeAPI.createCharge (PaymentResult.chargeId is stored)
+  - sourceField: Order.id
+    targetField: order_items.order_id
+    transform: set by OrderRepository.save when inserting the parent order in the same transaction
+  - sourceField: CreateOrderItemRequest.pizzaId
+    targetField: order_items.pizza_id
+  - sourceField: CreateOrderItemRequest.quantity
+    targetField: order_items.quantity
+  - sourceField: Pizza.priceCents
+    targetField: order_items.unit_price_cents
+    transform: snapshotted from pizzas.price_cents at order time via OrderService.place
+  - sourceField: Pizza.priceCents
+    targetField: orders.total_cents
+    transform: sum(OrderItem.quantity * Pizza.priceCents) computed in OrderService.place
+  - sourceField: Order.userId
+    targetField: orders.user_id
+  - sourceField: Order.status
+    targetField: orders.status

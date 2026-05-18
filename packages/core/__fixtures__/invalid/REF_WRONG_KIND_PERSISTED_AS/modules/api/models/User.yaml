@@ -1,0 +1,8 @@
+kind: model
+id: User
+name: User
+modelKind: entity
+persistedAs: module:api/component:NotATable
+fields:
+  - name: id
+    type: uuid

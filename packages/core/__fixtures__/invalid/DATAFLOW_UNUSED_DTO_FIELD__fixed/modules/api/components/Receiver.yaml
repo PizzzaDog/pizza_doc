@@ -1,0 +1,4 @@
+kind: component
+id: Receiver
+name: Receiver
+type: service

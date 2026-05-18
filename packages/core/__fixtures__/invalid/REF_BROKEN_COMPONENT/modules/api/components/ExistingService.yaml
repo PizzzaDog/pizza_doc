@@ -1,0 +1,4 @@
+kind: component
+id: ExistingService
+name: ExistingService
+type: service

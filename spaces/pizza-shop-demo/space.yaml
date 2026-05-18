@@ -1,0 +1,6 @@
+meta:
+  id: pizza-shop-demo
+  name: Pizza Shop Demo
+  description: A minimal pizza-ordering web app that exercises every feature of Pizza Doc — three actors, four modules, seven use cases, cross-module dataFlow, and database interactions.
+  version: 0.1.0
+  pizzaDocVersion: 0.1.0

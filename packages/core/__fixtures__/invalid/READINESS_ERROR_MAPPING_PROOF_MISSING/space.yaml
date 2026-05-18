@@ -1,0 +1,5 @@
+meta:
+  id: READINESS_ERROR_MAPPING_PROOF_MISSING
+  name: Readiness Error Mapping Proof Missing
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

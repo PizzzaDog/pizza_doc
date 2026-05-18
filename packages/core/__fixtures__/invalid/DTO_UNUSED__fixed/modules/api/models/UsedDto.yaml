@@ -1,0 +1,8 @@
+kind: model
+id: UsedDto
+name: UsedDto
+modelKind: dto
+fields:
+  - name: x
+    type: string
+    optional: true

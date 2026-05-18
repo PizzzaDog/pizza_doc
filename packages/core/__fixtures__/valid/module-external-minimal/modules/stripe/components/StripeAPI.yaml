@@ -1,0 +1,7 @@
+kind: component
+id: StripeAPI
+name: StripeAPI
+type: client
+methods:
+  - name: createCharge
+    returns: ChargeResult

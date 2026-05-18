@@ -1,0 +1,5 @@
+kind: actor
+id: customer
+name: Customer
+type: user
+description: A registered user who browses the menu and places pizza orders.

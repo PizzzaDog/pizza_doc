@@ -1,0 +1,15 @@
+kind: model
+id: SessionToken
+name: SessionToken
+modelKind: entity
+persistedAs: module:postgres-db/domain:users/table:sessions
+description: Issued on login; persisted so it can be revoked and expired.
+fields:
+  - name: id
+    type: uuid
+  - name: userId
+    type: uuid
+  - name: token
+    type: string
+  - name: expiresAt
+    type: timestamp

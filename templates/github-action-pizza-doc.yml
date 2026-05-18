@@ -1,0 +1,71 @@
+# Template: drop this in `.github/workflows/pizza-doc.yml` inside a repo
+# that hosts Pizza Doc spaces. Fails the PR on any validator error or
+# warning, below-threshold coverage, or orphan endpoint.
+#
+# Assumes the repo pins `@pizza-doc/cli` as a devDependency.
+
+name: Pizza Doc
+
+on:
+  pull_request:
+    paths:
+      - 'spaces/**'
+      - '.github/workflows/pizza-doc.yml'
+
+concurrency:
+  group: pizza-doc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # diff needs history for `pd diff`
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI (if local)
+        run: pnpm --filter @pizza-doc/cli build || true
+
+      - name: Validate + coverage + endpoint audit
+        run: |
+          shopt -s nullglob
+          failed=0
+          for dir in spaces/*/; do
+            [ -f "${dir}space.yaml" ] || continue
+            id=$(basename "$dir")
+            echo "::group::${id}"
+            pnpm pd validate "spaces/${id}" --strict-warnings || failed=1
+            pnpm pd coverage "spaces/${id}" || failed=1
+            pnpm pd endpoints "spaces/${id}" --orphans || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
+
+      - name: Spec diff vs base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          shopt -s nullglob
+          for dir in spaces/*/; do
+            [ -f "${dir}space.yaml" ] || continue
+            id=$(basename "$dir")
+            echo "::group::diff ${id}"
+            pnpm pd diff "origin/${{ github.base_ref }}" "spaces/${id}" || true
+            echo "::endgroup::"
+          done

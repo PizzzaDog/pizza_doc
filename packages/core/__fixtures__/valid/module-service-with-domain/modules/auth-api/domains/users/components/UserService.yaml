@@ -1,0 +1,8 @@
+kind: component
+id: UserService
+name: UserService
+type: service
+methods:
+  - name: create
+    returns: User
+    description: Creates a user

@@ -1,0 +1,17 @@
+kind: component
+id: UserRepository
+name: UserRepository
+type: repository
+description: Persists and retrieves user entities from the users table.
+methods:
+  - name: save
+    params:
+      - name: user
+        type: User
+    returns: User
+  - name: findByEmail
+    params:
+      - name: email
+        type: string
+    returns: Optional<User>
+    description: Returns the matched user or empty; UserService turns empty into InvalidCredentialsException on login or enters the insert branch on signup.

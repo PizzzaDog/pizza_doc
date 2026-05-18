@@ -1,0 +1,4 @@
+kind: module
+id: api
+name: API
+type: microservice

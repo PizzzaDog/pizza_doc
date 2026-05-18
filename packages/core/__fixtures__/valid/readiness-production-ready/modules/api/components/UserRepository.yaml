@@ -1,0 +1,10 @@
+kind: component
+id: UserRepository
+name: UserRepository
+type: repository
+methods:
+  - name: insert
+    params:
+      - name: req
+        type: CreateUserRequest
+    returns: UserRecord

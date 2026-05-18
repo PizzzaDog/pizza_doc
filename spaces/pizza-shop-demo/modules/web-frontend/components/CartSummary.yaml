@@ -1,0 +1,12 @@
+kind: component
+id: CartSummary
+name: CartSummary
+type: widget
+description: Inline summary at the top of CartPage; recomputes subtotal client-side as quantities change.
+methods:
+  - name: compute
+    params:
+      - name: items
+        type: List<OrderItem>
+    returns: int
+    description: Returns the subtotal in cents; should match server-side Order.totalCents at checkout time.

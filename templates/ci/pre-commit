@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Pizza Doc pre-commit hook.
+#
+# Install:
+#   cp templates/ci/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Runs `pd validate --strict-warnings` on every space that has staged
+# changes. Aborts the commit on any validator issue. Skips the check
+# when no space-facing files are staged.
+
+set -e
+
+changed_spaces=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E '^spaces/[^/]+/' \
+  | awk -F/ '{print $1 "/" $2}' \
+  | sort -u)
+
+if [ -z "$changed_spaces" ]; then
+  exit 0
+fi
+
+echo "pizza-doc pre-commit: validating changed spaces…"
+for dir in $changed_spaces; do
+  [ -f "${dir}/space.yaml" ] || continue
+  echo "  → ${dir}"
+  pnpm pd validate "${dir}" --strict-warnings
+done

@@ -1,0 +1,16 @@
+- key: WORKER_ROOT
+  type: non-secret
+  lifecycle: startup
+  mutability: rotatable
+  consumer:
+    component: module:worker-service
+  related: []
+  sourceOfTruth: deploy-yml-literal
+  defaultValue: /var/lib/workers
+  defaultSources:
+    - source: code
+      value: /var/lib/workers
+      sourceRef: services/worker/src/config.ts:22
+    - source: script
+      value: /var/lib/workers
+      sourceRef: scripts/provision-worker.sh:47

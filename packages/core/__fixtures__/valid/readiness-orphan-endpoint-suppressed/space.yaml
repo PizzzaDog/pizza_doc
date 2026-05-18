@@ -1,0 +1,5 @@
+meta:
+  id: readiness-orphan-endpoint-suppressed
+  name: Readiness Orphan Endpoint Suppressed
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

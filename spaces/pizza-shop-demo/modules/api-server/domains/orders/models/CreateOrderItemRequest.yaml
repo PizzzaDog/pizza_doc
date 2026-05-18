@@ -1,0 +1,10 @@
+kind: model
+id: CreateOrderItemRequest
+name: CreateOrderItemRequest
+modelKind: dto
+description: Client-side line-item shape sent inside CreateOrderRequest.items. id, orderId, and unitPriceCents are set by the server and intentionally absent here.
+fields:
+  - name: pizzaId
+    type: uuid
+  - name: quantity
+    type: int

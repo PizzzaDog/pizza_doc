@@ -1,0 +1,5 @@
+meta:
+  id: READINESS_EXTERNAL_DEP_PROOF_MISSING
+  name: Readiness External Dep Proof Missing
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

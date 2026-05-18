@@ -1,0 +1,9 @@
+kind: component
+id: B
+name: B
+type: service
+methods:
+  - name: bar
+    returns: void
+    calls:
+      - module:api/component:A/method:foo

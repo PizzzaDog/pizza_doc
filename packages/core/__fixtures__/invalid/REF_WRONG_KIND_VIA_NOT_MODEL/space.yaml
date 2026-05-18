@@ -1,0 +1,3 @@
+meta:
+  id: REF_WRONG_KIND_VIA_NOT_MODEL
+  name: step.via points at a component instead of a model

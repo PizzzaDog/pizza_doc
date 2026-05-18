@@ -1,0 +1,44 @@
+{
+  "name": "@pizza-doc/cli",
+  "version": "0.5.1",
+  "description": "Command-line tools for validating, scaffolding, auditing, and exporting Pizza Doc spaces.",
+  "license": "MIT",
+  "homepage": "https://github.com/PizzzaDog/pizza_doc",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PizzzaDog/pizza_doc.git",
+    "directory": "packages/cli"
+  },
+  "keywords": ["architecture", "yaml", "validator", "documentation", "ai"],
+  "type": "module",
+  "bin": {
+    "pizza-doc": "./dist/index.js",
+    "pd": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "skills/**/*.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@pizza-doc/core": "workspace:*",
+    "yaml": "2.6.0",
+    "zod": "3.23.8",
+    "zod-to-json-schema": "3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "typescript": "5.6.3"
+  }
+}

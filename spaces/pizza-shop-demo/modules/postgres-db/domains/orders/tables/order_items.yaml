@@ -1,0 +1,23 @@
+kind: table
+id: order_items
+name: order_items
+description: Line items; unit_price_cents is snapshotted at order time so later price changes don't mutate history.
+columns:
+  - name: id
+    sqlType: uuid
+    primaryKey: true
+  - name: order_id
+    sqlType: uuid
+    foreignKey:
+      table: module:postgres-db/domain:orders/table:orders
+      column: id
+  - name: pizza_id
+    sqlType: uuid
+    foreignKey:
+      table: module:postgres-db/domain:menu/table:pizzas
+      column: id
+  - name: quantity
+    sqlType: int
+  - name: unit_price_cents
+    sqlType: int
+    description: Copied from pizzas.price_cents at the moment the order is placed.

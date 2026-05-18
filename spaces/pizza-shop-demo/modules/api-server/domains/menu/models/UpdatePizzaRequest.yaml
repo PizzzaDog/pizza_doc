@@ -1,0 +1,18 @@
+kind: model
+id: UpdatePizzaRequest
+name: UpdatePizzaRequest
+modelKind: dto
+description: Partial update; any omitted field keeps its current value.
+fields:
+  - name: name
+    type: string
+    optional: true
+  - name: priceCents
+    type: int
+    optional: true
+  - name: available
+    type: boolean
+    optional: true
+  - name: imageUrl
+    type: string
+    optional: true
