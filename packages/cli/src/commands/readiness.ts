@@ -1,5 +1,7 @@
+import * as path from 'node:path'
 import { evaluateReadiness, validate } from '@pizza-doc/core'
-import type { ReadinessIssue, ReadinessMetric, ReadinessOptions } from '@pizza-doc/core'
+import type { ReadinessIssue, ReadinessMetric, ReadinessOptions, Space } from '@pizza-doc/core'
+import { collectMissingAnchors, gitToplevel, resolveAnchors } from '../util/anchors.js'
 import type { ParsedArgs } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
 import { loadSpaceForCli } from '../util/load.js'
@@ -41,12 +43,72 @@ export async function cmdReadiness(args: ParsedArgs): Promise<number> {
     console.log(`\n${green('✓')} production readiness checks passed`)
   }
 
+  const anchorOk = runAnchorGate(args, space, dir)
+
   const driftCode = await runOptionalDrift(args, dir)
   if (driftCode !== null && driftCode !== 0) {
     console.log(`\n${red('✗')} drift gate failed`)
   }
 
-  return readiness.passed && (driftCode === null || driftCode === 0) ? 0 : 1
+  return readiness.passed && anchorOk && (driftCode === null || driftCode === 0) ? 0 : 1
+}
+
+/**
+ * Production anchor gate: every `sourceRef` in the space must resolve to a
+ * real file. Deterministic (no LLM, no JSONL), so it belongs in the
+ * readiness gate next to coverage/proof — unlike `runOptionalDrift`, which
+ * needs an extracted snapshot. Returns true when the gate passes.
+ *
+ * Opt-in, like every other strict readiness check (`--strict-contracts`,
+ * `--check-state-coverage`, …). Triggered by:
+ *   --check-anchors     turn the gate on (resolves against the default root).
+ *   --code-root <dir>   set + turn on; root the sourceRef paths resolve
+ *                       against (default: git toplevel of the space, else cwd).
+ *   --require-anchors    turn on + additionally fail on code-backed entities
+ *                       (component / model / table) that carry no sourceRef.
+ *
+ * Default `pd readiness` does NOT resolve anchors: many specs cite code that
+ * lives outside this checkout (or is design-first), so resolving by default
+ * would be wrong. A design-first space under the gate is silent and passes.
+ */
+function runAnchorGate(args: ParsedArgs, space: Space, dir: string): boolean {
+  const explicitRoot = typeof args.flags['code-root'] === 'string'
+  const requireAnchors = args.flags['require-anchors'] === true
+  const checkAnchors = args.flags['check-anchors'] === true
+  if (!explicitRoot && !requireAnchors && !checkAnchors) return true
+
+  const codeRoot = explicitRoot
+    ? path.resolve(args.flags['code-root'] as string)
+    : (gitToplevel(dir) ?? process.cwd())
+
+  const { checked, resolved, issues } = resolveAnchors(space, codeRoot)
+  const missing = requireAnchors ? collectMissingAnchors(space) : []
+
+  if (checked === 0 && missing.length === 0) return true
+
+  const broken = issues.filter((i) => i.severity === 'broken')
+  const staleLines = issues.filter((i) => i.severity === 'stale-line')
+
+  console.log(`\n${bold(cyan('anchor gate:'))}  ${dim(`code-root ${codeRoot}`)}`)
+  const parts = [`${checked} checked`, green(`${resolved} resolved`)]
+  if (broken.length > 0) parts.push(red(`${broken.length} broken`))
+  if (staleLines.length > 0) parts.push(yellow(`${staleLines.length} stale`))
+  if (requireAnchors) {
+    parts.push(missing.length > 0 ? yellow(`${missing.length} missing`) : green('0 missing'))
+  }
+  console.log(`  ${parts.join(' · ')}`)
+
+  for (const i of broken) {
+    console.log(`  ${red('READINESS_ANCHOR_UNRESOLVED')} ${dim(`[${i.ref}]`)}`)
+    console.log(`    ${i.sourceRef} — ${i.reason}`)
+  }
+  for (const i of missing) {
+    console.log(`  ${yellow('READINESS_ANCHOR_MISSING')} ${dim(`[${i.ref}]`)}`)
+  }
+
+  const failed = broken.length > 0 || missing.length > 0
+  if (failed) console.log(`\n${red('✗')} anchor gate failed`)
+  return !failed
 }
 
 function strictWarnings(args: ParsedArgs): boolean {

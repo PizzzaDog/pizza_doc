@@ -22,9 +22,12 @@
  *                     CONFIG_RUNTIME_NO_ADMIN_UI · CONFIG_RELATED_BROKEN
  *                     EXTERNAL_DEP_USES_UNKNOWN_CONFIG
  *                     EXTERNAL_DEP_ARG_CONTRACT_INVALID · ADR_BROKEN_LINK
- *                     ADR_DUPLICATE_ID
+ *                     ADR_DUPLICATE_ID · TOOL_SCHEMA_TOPLEVEL_COMBINATOR
+ *                     ADR_EMBEDS_SCHEMA_LITERAL
  */
 
+import { parse as parseYamlValue } from 'yaml'
+import type { LoadedFile } from '../loader.js'
 import type { RefIndex } from '../ref.js'
 import type {
   Column,
@@ -41,11 +44,17 @@ import type { ValidationCode, ValidationIssue } from './types.js'
 
 // ---------- Public API ----------
 
-export type SemanticRule = (space: Space, index: RefIndex) => ValidationIssue[]
+export type SemanticRule = (
+  space: Space,
+  index: RefIndex,
+  options?: SemanticPassOptions,
+) => ValidationIssue[]
 
 export interface SemanticPassOptions {
   /** Rule codes to skip (for future CLI --disable or UI rule toggles). */
   disabledRules?: ReadonlySet<string>
+  /** Loaded raw files for rules that need literal/source-level checks. */
+  files?: ReadonlyMap<string, LoadedFile>
 }
 
 /** All rules in a stable order; mirrors page 05 ordering. */
@@ -82,6 +91,8 @@ export const ALL_SEMANTIC_RULES: ReadonlyArray<{
   { code: 'EXTERNAL_DEP_ARG_CONTRACT_INVALID', run: ruleExternalDepArgContractValid },
   { code: 'ADR_BROKEN_LINK', run: ruleAdrBrokenLink },
   { code: 'ADR_DUPLICATE_ID', run: ruleAdrDuplicateId },
+  { code: 'TOOL_SCHEMA_TOPLEVEL_COMBINATOR', run: ruleToolSchemaTopLevelCombinator },
+  { code: 'ADR_EMBEDS_SCHEMA_LITERAL', run: ruleAdrEmbedsSchemaLiteral },
   // 3.9 Calls/routes contract layer (v0.3 — A1)
   { code: 'CONTRACT_CALL_CREDENTIAL_MISSING', run: ruleContractCallCredentialMissing },
   { code: 'CONTRACT_CALL_PATH_ORPHAN', run: ruleContractCallPathOrphan },
@@ -120,7 +131,7 @@ export function validateSemanticPass(
   const issues: ValidationIssue[] = []
   for (const rule of ALL_SEMANTIC_RULES) {
     if (disabled.has(rule.code)) continue
-    issues.push(...rule.run(space, index))
+    issues.push(...rule.run(space, index, options))
   }
   return issues
 }
@@ -2252,6 +2263,265 @@ export function ruleAdrDuplicateId(space: Space, _index: RefIndex): ValidationIs
     }
   }
   return issues
+}
+
+/**
+ * MCP/tool schemas with a root combinator are accepted by ordinary JSON Schema
+ * tooling but silently dropped by Claude Code's tool registry. This rule looks
+ * for explicit tool-input schema literals in model/component files.
+ */
+export function ruleToolSchemaTopLevelCombinator(
+  _space: Space,
+  _index: RefIndex,
+  options?: SemanticPassOptions,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const files = options?.files
+  if (!files) return issues
+
+  const emitted = new Set<string>()
+  for (const file of files.values()) {
+    if (file.role.kind !== 'component' && file.role.kind !== 'model') continue
+
+    for (const candidate of collectToolSchemaCandidates(file)) {
+      const combinator = topLevelCombinator(candidate.schema)
+      if (!combinator) continue
+
+      const key = `${file.path}:${candidate.line ?? 0}:${candidate.name}:${combinator}`
+      if (emitted.has(key)) continue
+      emitted.add(key)
+      const issue: ValidationIssue = {
+        severity: 'warning',
+        code: 'TOOL_SCHEMA_TOPLEVEL_COMBINATOR',
+        file: file.path,
+        message: `Tool input schema '${candidate.name}' declares top-level '${combinator}'. Claude Code drops tools whose root input schema carries oneOf/anyOf/allOf/not; keep the root a plain object and enforce XOR-style invariants server-side.`,
+        suggestion:
+          'Flatten the tool input schema root to type=object/properties/required, move exactly-one-of validation into handler code, and document the invariant in property descriptions.',
+      }
+      if (candidate.line !== undefined) issue.line = candidate.line
+      issues.push(issue)
+    }
+  }
+  return issues
+}
+
+/**
+ * ADRs should point at binding YAML, not copy a second literal. Six identical
+ * consecutive lines is enough to prove the markdown duplicated model YAML and
+ * can drift independently.
+ */
+export function ruleAdrEmbedsSchemaLiteral(
+  _space: Space,
+  _index: RefIndex,
+  options?: SemanticPassOptions,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const files = options?.files
+  if (!files) return issues
+
+  const modelWindows = new Map<string, { file: string; line: number }>()
+  for (const file of files.values()) {
+    if (file.role.kind !== 'model') continue
+    const lines = normalizeLiteralLines(file.source)
+    for (let i = 0; i <= lines.length - SCHEMA_LITERAL_DUPLICATE_LINES; i++) {
+      const key = literalWindowKey(lines, i)
+      if (key && !modelWindows.has(key)) {
+        modelWindows.set(key, { file: file.path, line: i + 1 })
+      }
+    }
+  }
+  if (modelWindows.size === 0) return issues
+
+  const emitted = new Set<string>()
+  for (const file of files.values()) {
+    if (file.role.kind !== 'decision') continue
+    const blocks = extractFencedCodeBlocks(file.source).filter(
+      (block) => block.lang === 'json' || block.lang === 'yaml' || block.lang === 'yml',
+    )
+    for (const block of blocks) {
+      const lines = normalizeLiteralLines(stripCommonIndent(block.content))
+      for (let i = 0; i <= lines.length - SCHEMA_LITERAL_DUPLICATE_LINES; i++) {
+        const key = literalWindowKey(lines, i)
+        const model = key ? modelWindows.get(key) : undefined
+        if (!model) continue
+
+        const issueKey = `${file.path}:${block.startLine}:${i}:${model.file}:${model.line}`
+        if (emitted.has(issueKey)) break
+        emitted.add(issueKey)
+        issues.push({
+          severity: 'info',
+          code: 'ADR_EMBEDS_SCHEMA_LITERAL',
+          file: file.path,
+          line: block.startLine + 1 + i,
+          message: `ADR fenced ${block.lang} block duplicates at least ${SCHEMA_LITERAL_DUPLICATE_LINES} consecutive lines from ${model.file}:${model.line}. Binding literals should live in YAML once; ADRs should reference that path.`,
+          suggestion: `Replace the fenced literal with a link/path reference to ${model.file}.`,
+        })
+        break
+      }
+    }
+  }
+  return issues
+}
+
+const TOOL_SCHEMA_KEYS = new Set(['inputSchema', 'input_schema'])
+const TOP_LEVEL_SCHEMA_COMBINATORS = ['oneOf', 'anyOf', 'allOf', 'not'] as const
+const SCHEMA_LITERAL_DUPLICATE_LINES = 6
+
+interface ToolSchemaCandidate {
+  name: string
+  schema: unknown
+  line?: number
+}
+
+interface FencedCodeBlock {
+  lang: string
+  content: string
+  startLine: number
+  contextBefore: string
+}
+
+function collectToolSchemaCandidates(file: LoadedFile): ToolSchemaCandidate[] {
+  const out: ToolSchemaCandidate[] = []
+  collectInputSchemaObjects(file.data, out)
+
+  for (const block of extractFencedCodeBlocks(file.source)) {
+    const parsed = parseLiteralObject(block.content, block.lang)
+    if (!isRecord(parsed)) continue
+
+    for (const key of TOOL_SCHEMA_KEYS) {
+      if (key in parsed) {
+        pushToolSchemaCandidate(out, key, parsed[key], firstCombinatorLine(block))
+      }
+    }
+
+    if (mentionsInputSchema(block.contextBefore) && looksLikeJsonSchemaRoot(parsed)) {
+      pushToolSchemaCandidate(out, 'inputSchema', parsed, firstCombinatorLine(block))
+    }
+  }
+
+  return out
+}
+
+function pushToolSchemaCandidate(
+  out: ToolSchemaCandidate[],
+  name: string,
+  schema: unknown,
+  line?: number,
+): void {
+  const candidate: ToolSchemaCandidate = { name, schema }
+  if (line !== undefined) candidate.line = line
+  out.push(candidate)
+}
+
+function collectInputSchemaObjects(value: unknown, out: ToolSchemaCandidate[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectInputSchemaObjects(item, out)
+    return
+  }
+  if (!isRecord(value)) return
+
+  for (const [key, child] of Object.entries(value)) {
+    if (TOOL_SCHEMA_KEYS.has(key)) {
+      out.push({ name: key, schema: child })
+    }
+    collectInputSchemaObjects(child, out)
+  }
+}
+
+function topLevelCombinator(schema: unknown): (typeof TOP_LEVEL_SCHEMA_COMBINATORS)[number] | null {
+  if (!isRecord(schema)) return null
+  for (const key of TOP_LEVEL_SCHEMA_COMBINATORS) {
+    if (key in schema) return key
+  }
+  return null
+}
+
+function looksLikeJsonSchemaRoot(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.type === 'string' ||
+    'properties' in value ||
+    'required' in value ||
+    TOP_LEVEL_SCHEMA_COMBINATORS.some((key) => key in value)
+  )
+}
+
+function parseLiteralObject(content: string, lang: string): unknown {
+  const normalized = stripCommonIndent(content)
+  try {
+    if (lang === 'json') return JSON.parse(normalized)
+    if (lang === 'yaml' || lang === 'yml') return parseYamlValue(normalized)
+  } catch {
+    return null
+  }
+  return null
+}
+
+function extractFencedCodeBlocks(source: string): FencedCodeBlock[] {
+  const out: FencedCodeBlock[] = []
+  const lines = source.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const open = lines[i]?.match(/^\s*```([A-Za-z0-9_-]+)?\s*$/)
+    if (!open) continue
+
+    const lang = (open[1] ?? '').toLowerCase()
+    const startLine = i + 1
+    const content: string[] = []
+    i++
+    while (i < lines.length && !/^\s*```\s*$/.test(lines[i] ?? '')) {
+      content.push(lines[i] ?? '')
+      i++
+    }
+
+    out.push({
+      lang,
+      content: content.join('\n'),
+      startLine,
+      contextBefore: lines.slice(Math.max(0, startLine - 6), startLine - 1).join('\n'),
+    })
+  }
+  return out
+}
+
+function firstCombinatorLine(block: FencedCodeBlock): number | undefined {
+  const lines = stripCommonIndent(block.content).split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(oneOf|anyOf|allOf|not)\s*:/.test(lines[i] ?? '')) {
+      return block.startLine + 1 + i
+    }
+  }
+  return block.startLine + 1
+}
+
+function mentionsInputSchema(text: string): boolean {
+  return /\binput[_-]?schema\b/i.test(text)
+}
+
+function normalizeLiteralLines(source: string): string[] {
+  return source.split(/\r?\n/).map((line) => line.trimEnd())
+}
+
+function literalWindowKey(lines: readonly string[], start: number): string | null {
+  const window = lines.slice(start, start + SCHEMA_LITERAL_DUPLICATE_LINES)
+  if (window.length < SCHEMA_LITERAL_DUPLICATE_LINES) return null
+  if (window.some((line) => line.trim() === '')) return null
+  return window.join('\n')
+}
+
+function stripCommonIndent(source: string): string {
+  const lines = source.replace(/\t/g, '  ').split(/\r?\n/)
+  const nonEmpty = lines.filter((line) => line.trim() !== '')
+  const minIndent =
+    nonEmpty.length === 0
+      ? 0
+      : Math.min(...nonEmpty.map((line) => line.match(/^ */)?.[0].length ?? 0))
+  return lines
+    .map((line) => line.slice(minIndent))
+    .join('\n')
+    .trim()
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 // Type-level evidence the new types are wired through this module so

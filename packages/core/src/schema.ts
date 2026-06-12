@@ -107,6 +107,22 @@ export const FieldSchema = z
     type: z.string(),
     optional: z.boolean().default(false),
     /**
+     * Collection cardinality at this field. Default `'one'` means the
+     * declared `type` is taken literally; `'many'` wraps the type as a
+     * homogeneous collection (TS `T[]`, Go `[]T`, OpenAPI `array of T`).
+     *
+     * Authors may instead encode the collection directly in `type`
+     * (`List<X>`, `X[]`) — that legacy form is still honored. The
+     * structured field exists so spec readers do not have to parse prose
+     * like "cardinality is many" or remember to write `List<>`; tooling
+     * can rely on `cardinality === 'many'` instead.
+     *
+     * If both encodings are present (e.g. `type: List<X>` AND
+     * `cardinality: many`) the field is still a single-level collection —
+     * the cardinality is not multiplied.
+     */
+    cardinality: z.enum(['one', 'many']).default('one'),
+    /**
      * `false` for derived / non-persisted fields on entity models — JPA
      * `@OneToMany` relations, `@Transient` properties, computed getters.
      * Defaults to `true` so existing specs keep working. When `false`, the

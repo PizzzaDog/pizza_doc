@@ -48,7 +48,10 @@ export function validate(loadResult: LoadResult, options?: ValidateOptions): Val
     }
   }
 
-  const semanticIssues = validateSemanticPass(loadResult.space, refsResult.index, options?.semantic)
+  const semanticIssues = validateSemanticPass(loadResult.space, refsResult.index, {
+    ...options?.semantic,
+    files: options?.semantic?.files ?? loadResult.files,
+  })
   issues.push(...semanticIssues)
   const semanticPassed = !hasErrors(semanticIssues)
 

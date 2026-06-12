@@ -3,6 +3,7 @@
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { cmdAdd } from './commands/add.js'
+import { cmdAnchors } from './commands/anchors.js'
 import { cmdChange } from './commands/change.js'
 import { cmdCoverage } from './commands/coverage.js'
 import { cmdDataflow } from './commands/dataflow.js'
@@ -64,6 +65,8 @@ export async function runCli(argv = process.argv.slice(2), io: CliIo = defaultIo
         return cmdInit(parsed)
       case 'add':
         return cmdAdd(parsed)
+      case 'anchors':
+        return await cmdAnchors(parsed)
       case 'change':
         return await cmdChange(parsed)
       case 'import':
@@ -148,6 +151,8 @@ ${bold('quality gates:')}
                                   --check-runbook-coverage  errorFlow → runbook (severity-aware)
   ${cyan('readiness')}     [<dir>] [--profile production] [--min-endpoints 100] ...
                                 [--drift-from-jsonl <file>]
+                                [--check-anchors] [--require-anchors] [--code-root <dir>]
+                                  opt-in anchor gate: every sourceRef resolves to a real file
   ${cyan('coverage')}      [<dir>] [--min-components 80] ...
   ${cyan('orphans')}       [<dir>] [--kind components|models|tables|endpoints]
   ${cyan('endpoints')}     [<dir>] [--orphans]
@@ -155,6 +160,9 @@ ${bold('quality gates:')}
   ${cyan('diff')}          <git-ref> [<dir>]
   ${cyan('diff')}          --change <id> [<dir>]
   ${cyan('drift')}         --from-jsonl <code-extract.jsonl> [<dir>]
+  ${cyan('anchors')}       [<dir>] [--code-root <dir>] [--require-all] [--json]
+                                deterministic spec↔code check: every sourceRef
+                                resolves to a real file (no LLM, CI-friendly)
   ${cyan('doctor')}        [<dir>] [--fix-ci]
                                 advisory checklist: git presence, language hint,
                                 flag suggestions, CI workflow scaffold

@@ -69,6 +69,7 @@ describe('inspector entity file serializers', () => {
               name: 'request',
               type: 'CreateUserRequest',
               persisted: true,
+              cardinality: 'one',
               optional: false,
               validation: { minLength: 1 },
               sourceRef: 'src/CreateUserRequest.ts:1',
@@ -116,11 +117,12 @@ describe('inspector entity file serializers', () => {
       persistedAs: 'module:db/table:orders',
       sourceRef: 'src/Order.ts',
       fields: [
-        { name: 'id', type: 'uuid', optional: false, persisted: true },
+        { name: 'id', type: 'uuid', optional: false, cardinality: 'one', persisted: true },
         {
           name: 'items',
           type: 'List<OrderItem>',
           optional: false,
+          cardinality: 'one',
           persisted: false,
           description: 'JPA relation.',
         },

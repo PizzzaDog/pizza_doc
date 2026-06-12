@@ -51,6 +51,10 @@ const FIXTURELESS_RULES = [
   'EXTERNAL_DEP_ARG_CONTRACT_INVALID',
   'ADR_BROKEN_LINK',
   'ADR_DUPLICATE_ID',
+  // HL-300 incident-derived raw-file rules. Covered by cli
+  // __tests__/incident-lints.test.ts because they need LoadedFile.source.
+  'TOOL_SCHEMA_TOPLEVEL_COMBINATOR',
+  'ADR_EMBEDS_SCHEMA_LITERAL',
   // 3.9 — A1 calls/routes contract rules. Covered by
   // validator.contracts.test.ts with in-memory Space fixtures.
   'CONTRACT_CALL_CREDENTIAL_MISSING',

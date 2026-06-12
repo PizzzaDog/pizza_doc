@@ -271,12 +271,22 @@ function modelToSchema(model: Model): OpenApiSchema {
 }
 
 function fieldToSchema(field: Field): OpenApiSchema {
-  const base = typeToSchemaBare(field.type)
+  const inner = typeToSchemaBare(field.type)
   if (field.validation) {
-    applyValidation(base, field.validation)
+    applyValidation(inner, field.validation)
   }
-  if (field.description) base.description = field.description
-  return base
+  // `cardinality: many` wraps the scalar/$ref in an OpenAPI `array` —
+  // unless the author already encoded the array in `type` (`List<X>`,
+  // `X[]`), in which case `typeToSchemaBare` would not have produced an
+  // array shape anyway because it strips collection wrappers. Keep the
+  // wrap one-level only to mirror the TS/Go emitters.
+  if (field.cardinality === 'many' && inner.type !== 'array') {
+    const out: OpenApiSchema = { type: 'array', items: inner }
+    if (field.description) out.description = field.description
+    return out
+  }
+  if (field.description) inner.description = field.description
+  return inner
 }
 
 function applyValidation(schema: OpenApiSchema, v: Validation): void {
@@ -307,11 +317,12 @@ function typeToSchema(type: string, modelByName: Map<string, Model>): OpenApiSch
     const inner = typeToSchema(trimmed.slice(0, -1).trim(), modelByName)
     return { ...inner, nullable: true }
   }
-  // List wrappers.
+  // List wrappers. `Collection<X>` is treated as `List<X>` — both are
+  // unordered iterables on the wire.
   if (trimmed.endsWith('[]')) {
     return { type: 'array', items: typeToSchema(trimmed.slice(0, -2).trim(), modelByName) }
   }
-  const wrap = trimmed.match(/^(List|Array|Set)<(.+)>$/i)
+  const wrap = trimmed.match(/^(List|Array|Set|Collection)<(.+)>$/i)
   if (wrap?.[2]) {
     return { type: 'array', items: typeToSchema(wrap[2].trim(), modelByName) }
   }
@@ -319,6 +330,52 @@ function typeToSchema(type: string, modelByName: Map<string, Model>): OpenApiSch
   if (opt?.[1]) {
     const inner = typeToSchema(opt[1].trim(), modelByName)
     return { ...inner, nullable: true }
+  }
+  // `Page<X>` — Spring Data pagination envelope. Translated to the
+  // canonical 5-field envelope used by every Spring-Data-backed admin
+  // API (content + totalElements + totalPages + number + size). The
+  // generated `Page` schema is stable across `X` and lives in the
+  // shared `components.schemas` block so every Page<X> $refs into the
+  // same inline shape.
+  const page = trimmed.match(/^Page<(.+)>$/)
+  if (page?.[1]) {
+    const innerType = page[1].trim()
+    const itemSchema = modelByName.has(innerType)
+      ? { $ref: `#/components/schemas/${innerType}` }
+      : typeToSchema(innerType, modelByName)
+    return {
+      type: 'object',
+      properties: {
+        content: { type: 'array', items: itemSchema },
+        totalElements: { type: 'integer' },
+        totalPages: { type: 'integer' },
+        number: { type: 'integer' },
+        size: { type: 'integer' },
+      },
+      required: ['content', 'totalElements', 'totalPages', 'number', 'size'],
+    }
+  }
+  // `Pageable` — Spring Data request envelope (page + size + sort). The
+  // wire form is the query-string trio `?page=&size=&sort=`; we expose
+  // it as an inline object so OpenAPI clients can model it as a body
+  // when needed. Most controller methods will not see it as a body
+  // (Spring binds it from query params) but `pd export openapi`
+  // serializes it for completeness.
+  if (trimmed === 'Pageable') {
+    return {
+      type: 'object',
+      properties: {
+        page: { type: 'integer' },
+        size: { type: 'integer' },
+        sort: { type: 'array', items: { type: 'string' } },
+      },
+    }
+  }
+  // `Specification<X>` — Spring Data JPA criteria builder. There is no
+  // meaningful wire shape (it is purely an in-process query AST); we
+  // emit an opaque object so OpenAPI does not lie about a structure.
+  if (/^Specification<.+>$/.test(trimmed)) {
+    return { type: 'object', description: 'Opaque query specification (Spring Data Specification)' }
   }
   // Model reference.
   if (modelByName.has(trimmed)) {
@@ -338,6 +395,9 @@ function typeToSchemaBare(type: string): OpenApiSchema {
       return { type: 'string' }
     case 'uuid':
       return { type: 'string', format: 'uuid' }
+    case 'url':
+    case 'uri':
+      return { type: 'string', format: 'uri' }
     case 'int':
     case 'integer':
     case 'long':
@@ -356,6 +416,11 @@ function typeToSchemaBare(type: string): OpenApiSchema {
     case 'timestamp':
     case 'timestamptz':
     case 'datetime':
+    // `instant` is the Java/JSR-310 `java.time.Instant` — a moment on the
+    // UTC timeline serialized to ISO-8601 over JSON. Same wire-shape as
+    // `timestamp`, kept as a separate case so spec authors who think in
+    // Java types do not have to translate.
+    case 'instant':
       return { type: 'string', format: 'date-time' }
     case 'date':
       return { type: 'string', format: 'date' }
@@ -698,12 +763,27 @@ function renderTsRecord(model: Model): string[] {
   lines.push(`export interface ${model.name} {`)
   for (const f of model.fields) {
     if (f.description) lines.push(`  /** ${escapeJsDoc(f.description)} */`)
-    const tsType = mapTsType(f.type)
-    const optional = f.optional ? '?' : ''
-    lines.push(`  ${f.name}${optional}: ${tsType}`)
+    lines.push(`  ${f.name}${f.optional ? '?' : ''}: ${tsFieldType(f)}`)
   }
   lines.push('}')
   return lines
+}
+
+/**
+ * Map a `Field` to its TypeScript surface type. Honors `cardinality: many`
+ * by wrapping the mapped type in `T[]` unless the author already encoded
+ * the collection in `type` (`List<X>`, `X[]`) — we never double-wrap.
+ */
+function tsFieldType(f: Field): string {
+  const base = mapTsType(f.type)
+  if (f.cardinality === 'many' && !isTsCollection(base)) return `${base}[]`
+  return base
+}
+
+function isTsCollection(t: string): boolean {
+  // `T[]`, `T[][]`, `Foo<bar>[]`. The trailing `]` is the cheap structural
+  // check that covers everything `mapTsType` emits for collections.
+  return t.trimEnd().endsWith(']')
 }
 
 function pushDocTs(lines: string[], description?: string): void {
@@ -726,6 +806,13 @@ function escapeJsDoc(s: string): string {
 function mapTsType(raw: string): string {
   const t = raw.trim()
   if (!t) return 'unknown'
+  // `X?` suffix — Kotlin/Swift-style nullable. Behaves the same as
+  // `Optional<X>`: the field-level `?:` covers "key may be missing", the
+  // `| null` covers "value may be null".
+  if (t.endsWith('?') && !t.endsWith('[]?')) {
+    const inner = t.slice(0, -1).trim()
+    if (inner) return `${mapTsType(inner)} | null`
+  }
   // Optional<X> → X | null. The field-level `?:` already covers
   // "key may be missing"; the `| null` covers "value may be null".
   const opt = t.match(/^Optional<(.+)>$/i) ?? t.match(/^Maybe<(.+)>$/i)
@@ -733,20 +820,43 @@ function mapTsType(raw: string): string {
   // Stream<X> — push channel / lazy producer. Idiomatic TS is async iter.
   const stream = t.match(/^Stream<(.+)>$/i)
   if (stream?.[1]) return `AsyncIterable<${mapTsType(stream[1])}>`
-  // List<X>, Array<X>, Set<X> → X[]
-  const list = t.match(/^(?:List|Array|Set)<(.+)>$/i)
+  // List<X>, Array<X>, Set<X>, Collection<X> → X[]. Collection is treated
+  // as an unordered iterable (Java/Spring spec authors use Collection<>
+  // when ordering is not part of the contract).
+  const list = t.match(/^(?:List|Array|Set|Collection)<(.+)>$/i)
   if (list?.[1]) return `${mapTsType(list[1])}[]`
   // X[]
   if (t.endsWith('[]')) return `${mapTsType(t.slice(0, -2))}[]`
   // Map<K, V> → Record<K, V>
   const map = t.match(/^Map<\s*([^,>]+)\s*,\s*(.+)\s*>$/i)
   if (map?.[1] && map[2]) return `Record<${mapTsType(map[1])}, ${mapTsType(map[2])}>`
+  // `Page<X>` — Spring Data pagination envelope. Inline structural type
+  // keeps the FE binding free of any pizza-doc runtime — every callsite
+  // sees the same shape.
+  const page = t.match(/^Page<(.+)>$/)
+  if (page?.[1]) {
+    const inner = mapTsType(page[1])
+    return `{ content: ${inner}[]; totalElements: number; totalPages: number; number: number; size: number }`
+  }
+  // `Pageable` — Spring Data request envelope. Equivalent to the
+  // query-string trio `?page=&size=&sort=`; expressed as a structural
+  // object so TS code can construct it directly.
+  if (t === 'Pageable') {
+    return '{ page?: number; size?: number; sort?: string[] }'
+  }
+  // `Specification<X>` — Spring Data JPA criteria builder. Opaque to
+  // non-JVM consumers; emit `unknown` so the type-check fails loudly
+  // when someone accidentally constructs one outside JVM code.
+  if (/^Specification<.+>$/.test(t)) return 'unknown'
   // Strip parameterised numeric sizes — varchar(255) → varchar, decimal(19,4) → decimal.
   const paren = t.match(/^([A-Za-z_]+)\s*\(/)
   const head = paren?.[1] ?? t
   const lower = head.toLowerCase()
   if (lower === 'string' || lower === 'text' || lower === 'varchar') return 'string'
   if (lower === 'uuid') return 'string'
+  // `url` / `uri` — string-shaped types kept as recognised aliases so
+  // generated TS does not pass them through as opaque names.
+  if (lower === 'url' || lower === 'uri') return 'string'
   if (
     lower === 'int' ||
     lower === 'integer' ||
@@ -761,8 +871,26 @@ function mapTsType(raw: string): string {
   )
     return 'number'
   if (lower === 'boolean' || lower === 'bool') return 'boolean'
-  if (lower === 'timestamp' || lower === 'timestamptz' || lower === 'datetime' || lower === 'date')
+  if (
+    lower === 'timestamp' ||
+    lower === 'timestamptz' ||
+    lower === 'datetime' ||
+    lower === 'date' ||
+    // `instant` (Java `java.time.Instant`) — same ISO-8601 wire form
+    // as `timestamp`, kept as a separate case so spec authors who
+    // think in Java types do not have to translate.
+    lower === 'instant' ||
+    // `duration` — wire form is an ISO-8601 duration string. No
+    // first-class TS type, so we use the string and let consumers
+    // parse if needed.
+    lower === 'duration'
+  )
     return 'string'
+  // `context` is a Go-only construct (request lifecycle / cancellation).
+  // In TS we treat it as opaque so generated code does not lie about
+  // the surface; consumers needing cancellation should plumb it via
+  // their fetch / abort-controller signature directly.
+  if (lower === 'context') return 'unknown'
   if (lower === 'json' || lower === 'jsonb') return 'unknown'
   if (lower === 'object') return 'object'
   if (lower === 'any') return 'unknown'
@@ -798,6 +926,7 @@ export async function exportGoTypes(args: ParsedArgs): Promise<number> {
 }
 
 export function renderGoTypes(space: Space, pkg: string): string {
+  resetGoExtraTypes()
   const lines: string[] = []
   lines.push(generatedBanner('go-types', space, 'go'))
   lines.push(`package ${pkg}`)
@@ -819,6 +948,9 @@ export function renderGoTypes(space: Space, pkg: string): string {
     bodyLines.push(...renderGoStruct(m, imports))
     bodyLines.push('')
   }
+  // Emit any Java-ism helpers (Pageable / PageOfX) the structs picked up.
+  // These do not need extra imports — pure Go primitives only.
+  const extras = renderExtraGoTypes()
   if (imports.size > 0) {
     if (imports.size === 1) {
       const [only] = [...imports]
@@ -830,6 +962,7 @@ export function renderGoTypes(space: Space, pkg: string): string {
     }
     lines.push('')
   }
+  lines.push(...extras)
   lines.push(...bodyLines)
   return `${lines.join('\n').trimEnd()}\n`
 }
@@ -871,15 +1004,20 @@ function renderGoStruct(model: Model, imports: Set<string>): string[] {
   lines.push(`type ${model.name} struct {`)
   for (const f of model.fields) {
     if (f.description) lines.push(`\t// ${f.description.replace(/\n/g, ' ')}`)
-    const goType = mapGoType(f.type, imports)
+    const baseType = mapGoType(f.type, imports)
+    const collectionType =
+      f.cardinality === 'many' && !baseType.startsWith('[]') ? `[]${baseType}` : baseType
     const omitempty = f.optional ? ',omitempty' : ''
+    // Optional collections stay slices (nil slice marshals fine); only
+    // non-collection optionals become pointer types so the omitempty tag
+    // can distinguish "absent" from "zero value".
     const fieldType =
       f.optional &&
-      !goType.startsWith('[]') &&
-      !goType.startsWith('map[') &&
-      !goType.startsWith('*')
-        ? `*${goType}`
-        : goType
+      !collectionType.startsWith('[]') &&
+      !collectionType.startsWith('map[') &&
+      !collectionType.startsWith('*')
+        ? `*${collectionType}`
+        : collectionType
     lines.push(`\t${pascalCase(f.name)} ${fieldType} \`json:"${f.name}${omitempty}"\``)
   }
   lines.push('}')
@@ -910,6 +1048,13 @@ function pascalCase(s: string): string {
 function mapGoType(raw: string, imports: Set<string>): string {
   const t = raw.trim()
   if (!t) return 'any'
+  // `X?` suffix — Kotlin/Swift-style nullable. Same treatment as
+  // `Optional<X>` (optional is handled at the field/return level via a
+  // pointer, not in the base type).
+  if (t.endsWith('?') && !t.endsWith('[]?')) {
+    const inner = t.slice(0, -1).trim()
+    if (inner) return mapGoType(inner, imports)
+  }
   const opt = t.match(/^Optional<(.+)>$/i) ?? t.match(/^Maybe<(.+)>$/i)
   if (opt?.[1]) return mapGoType(opt[1], imports) // optional handled at field level via pointer
   // Stream<X> — push channel / lazy producer. Idiomatic Go is a
@@ -918,15 +1063,68 @@ function mapGoType(raw: string, imports: Set<string>): string {
   // safer default since it works on every Go version we care about.
   const stream = t.match(/^Stream<(.+)>$/i)
   if (stream?.[1]) return `<-chan ${mapGoType(stream[1], imports)}`
-  const list = t.match(/^(?:List|Array|Set)<(.+)>$/i)
+  // `Promise<X>` is a TS-only async wrapper. Go methods are inherently
+  // sync (concurrency is the caller's choice), so the Promise is
+  // stripped — the generated Go interface returns the underlying type
+  // and the standard `error`. This means a TS author who writes a
+  // Promise<X> return ends up with the same Go signature an author who
+  // wrote bare X would get; the only difference is on the TS side
+  // (where `mapTsType` preserves the wrapper).
+  const promise = t.match(/^Promise<(.+)>$/i)
+  if (promise?.[1]) return mapGoType(promise[1], imports)
+  // List<X>, Array<X>, Set<X>, Collection<X> → []X. Collection is
+  // treated as an unordered iterable.
+  const list = t.match(/^(?:List|Array|Set|Collection)<(.+)>$/i)
   if (list?.[1]) return `[]${mapGoType(list[1], imports)}`
   if (t.endsWith('[]')) return `[]${mapGoType(t.slice(0, -2), imports)}`
   const map = t.match(/^Map<\s*([^,>]+)\s*,\s*(.+)\s*>$/i)
   if (map?.[1] && map[2]) return `map[${mapGoType(map[1], imports)}]${mapGoType(map[2], imports)}`
+  // `Page<X>` — Spring Data pagination envelope. We translate to a
+  // concrete `PageOf<X>` struct name and remember the inner type so the
+  // emitter can declare a top-level `type PageOf<X> struct { ... }`
+  // exactly once even if multiple methods return the same wrapper.
+  // The caller registers `PageOf<X>` in `pageWrappers` (see
+  // `renderGoTypes` / `renderGoInterfaces`).
+  const page = t.match(/^Page<(.+)>$/)
+  if (page?.[1]) {
+    const inner = page[1].trim()
+    const innerGo = mapGoType(inner, imports)
+    const wrapperName = `PageOf${pascalCase(inner)}`
+    pageWrappersInScope.set(wrapperName, innerGo)
+    return wrapperName
+  }
+  // `Pageable` — Spring Data request envelope. Idiomatic Go translation
+  // is a small struct with the canonical trio. Registered as a one-shot
+  // sentinel so the emitter declares it at most once per file.
+  if (t === 'Pageable') {
+    pageableInScope.value = true
+    return 'Pageable'
+  }
+  // `Specification<X>` — Spring Data JPA criteria. Opaque outside the
+  // JVM; pass through as `any` so the interface still compiles.
+  if (/^Specification<.+>$/.test(t)) return 'any'
+  // Inline object literal types — `{ token: string }`, `{ a: int; b?: number }`.
+  // These leak from TS-influenced specs. We emit `any` so the Go file
+  // compiles; the structural shape is preserved in the spec for OpenAPI
+  // / TS consumers (mapTsType passes the inline shape through verbatim
+  // because TS already understands it natively).
+  if (t.startsWith('{') && t.endsWith('}')) return 'any'
   const paren = t.match(/^([A-Za-z_]+)\s*\(/)
   const head = paren?.[1] ?? t
   const lower = head.toLowerCase()
-  if (lower === 'string' || lower === 'text' || lower === 'varchar' || lower === 'uuid')
+  if (
+    lower === 'string' ||
+    lower === 'text' ||
+    lower === 'varchar' ||
+    lower === 'uuid' ||
+    // `url` is just a string with an unenforced shape constraint. Go
+    // does not natively distinguish, and forcing the spec to use
+    // `string` everywhere is noise — keep `url` as a recognised alias
+    // so the generated Go file compiles. (OpenAPI emitter could later
+    // surface `format: uri` here; not required for compile-correctness.)
+    lower === 'url' ||
+    lower === 'uri'
+  )
     return 'string'
   if (lower === 'int' || lower === 'integer') return 'int'
   if (lower === 'smallint') return 'int16'
@@ -939,10 +1137,57 @@ function mapGoType(raw: string, imports: Set<string>): string {
     lower === 'timestamp' ||
     lower === 'timestamptz' ||
     lower === 'datetime' ||
-    lower === 'date'
+    lower === 'date' ||
+    // `instant` (Java `java.time.Instant`) — same `time.Time` wire form
+    // as `timestamp`. Kept as a separate case so spec authors who think
+    // in Java types do not have to translate.
+    lower === 'instant'
   ) {
     imports.add('time')
     return 'time.Time'
+  }
+  // `duration` — durations are first-class in Go (`time.Duration`).
+  // Authors who write `Duration` in the spec almost always mean
+  // `time.Duration`, not the wire-encoded ISO 8601 string. Keep the
+  // ergonomic mapping; OpenAPI emitter can later render this as
+  // `{ type: 'string', format: 'duration' }` if needed.
+  if (lower === 'duration') {
+    imports.add('time')
+    return 'time.Duration'
+  }
+  // `context` — Go's standard request-scoped context. Always pulled in
+  // by repository/orchestrator interfaces. Mapping by name keeps the
+  // spec language-neutral while still emitting idiomatic Go.
+  if (lower === 'context') {
+    imports.add('context')
+    return 'context.Context'
+  }
+  // Package-qualified Go stdlib references like `http.Request` or
+  // `http.ResponseWriter`. Spec authors sometimes leak them through
+  // params (HTTP middleware signatures); add the corresponding import
+  // and pass the literal through.
+  const stdPkg = t.match(/^([a-z][a-z0-9_]*)\.([A-Z][A-Za-z0-9_]*)$/)
+  if (stdPkg?.[1] && stdPkg[2]) {
+    const pkg = stdPkg[1]
+    // Map short stdlib names to their canonical import path. Anything
+    // outside this allow-list passes through unchanged and the caller
+    // must declare the import manually (or the Go file fails to compile,
+    // which is the correct outcome for non-stdlib package leakage).
+    const stdLibImport: Record<string, string> = {
+      http: 'net/http',
+      url: 'net/url',
+      context: 'context',
+      time: 'time',
+      io: 'io',
+      os: 'os',
+      sql: 'database/sql',
+      json: 'encoding/json',
+    }
+    const importPath = stdLibImport[pkg]
+    if (importPath) {
+      imports.add(importPath)
+      return t
+    }
   }
   // `json` / `jsonb` → encoding/json.RawMessage. Adding the import.
   if (lower === 'json' || lower === 'jsonb') {
@@ -957,6 +1202,60 @@ function mapGoType(raw: string, imports: Set<string>): string {
   if (lower === 'bytes' || lower === 'bytea' || lower === 'blob') return '[]byte'
   if (lower === 'void') return ''
   return t
+}
+
+/**
+ * Per-emit registries for Java-isms that need a synthesized helper type
+ * in the generated Go file (`Page<X>` → `PageOfX` struct, `Pageable` →
+ * one shared struct). Reset at the top of every `renderGoTypes` /
+ * `renderGoInterfaces` call so concurrent renders do not leak state.
+ *
+ * The registries are module-private mutables instead of threaded through
+ * the recursive `mapGoType` signature because the alternative — passing
+ * a context object through every `mapGoType` call — would touch every
+ * call-site in this file. The render entry points (the only places that
+ * matter) reset them; nothing else reads them mid-emit.
+ */
+const pageWrappersInScope: Map<string, string> = new Map()
+const pageableInScope: { value: boolean } = { value: false }
+
+function resetGoExtraTypes(): void {
+  pageWrappersInScope.clear()
+  pageableInScope.value = false
+}
+
+function renderExtraGoTypes(): string[] {
+  const lines: string[] = []
+  if (pageableInScope.value) {
+    lines.push(
+      '// Pageable spring Data request envelope (page + size + sort). Generated',
+      '// because spec authors used the Java-side type directly.',
+      'type Pageable struct {',
+      '\tPage int      `json:"page"`',
+      '\tSize int      `json:"size"`',
+      '\tSort []string `json:"sort,omitempty"`',
+      '}',
+      '',
+    )
+  }
+  // Stable ordering by wrapper name so consecutive emits produce
+  // byte-identical output for the same spec.
+  const wrappers = [...pageWrappersInScope.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [name, inner] of wrappers) {
+    lines.push(
+      `// ${name} spring Data Page<${inner}> envelope. Generated because the spec`,
+      `// uses Page<${inner}> as a return type.`,
+      `type ${name} struct {`,
+      `\tContent       []${inner} \`json:"content"\``,
+      '\tTotalElements int64    `json:"totalElements"`',
+      '\tTotalPages    int      `json:"totalPages"`',
+      '\tNumber        int      `json:"number"`',
+      '\tSize          int      `json:"size"`',
+      '}',
+      '',
+    )
+  }
+  return lines
 }
 
 // ==========================================================================
@@ -981,17 +1280,36 @@ export async function exportGoInterfaces(args: ParsedArgs): Promise<number> {
 }
 
 export function renderGoInterfaces(space: Space, pkg: string): string {
+  resetGoExtraTypes()
   const lines: string[] = []
   lines.push(generatedBanner('go-interfaces', space, 'go'))
   lines.push(`package ${pkg}`)
   lines.push('')
   const bodyLines: string[] = []
   const imports = new Set<string>()
-  for (const { component, ref } of allComponents(space)) {
+  // De-dup by component name — different modules can declare a component
+  // with the same id (e.g. an FE-side `PreviewController` and a BE-side
+  // `PreviewController`), and Go cannot have two `type X interface`
+  // declarations in the same package. The service-type filter usually
+  // resolves this, but the explicit Set is a safety net.
+  const seen = new Set<string>()
+  for (const { component, module, ref } of allComponents(space)) {
     if (component.methods.length === 0) continue
+    // Skip frontend / database / queue / external modules — the Go
+    // interfaces file is a contract for *backend Go services*. Frontend
+    // components live in `pd export typescript-types`; database / queue
+    // modules have no executable surface here.
+    if (module.type !== 'service') continue
+    if (seen.has(component.name)) continue
+    seen.add(component.name)
     bodyLines.push(...renderGoInterface(component, ref, imports))
     bodyLines.push('')
   }
+  // Any Pageable / PageOfX helpers triggered by method signatures must
+  // be declared inline in this file — `internal/contracts/interfaces.go`
+  // is typically the only file in the contracts package, so the
+  // declarations cannot live elsewhere without `go-types` regen.
+  const extras = renderExtraGoTypes()
   if (imports.size > 0) {
     if (imports.size === 1) {
       const [only] = [...imports]
@@ -1003,6 +1321,7 @@ export function renderGoInterfaces(space: Space, pkg: string): string {
     }
     lines.push('')
   }
+  lines.push(...extras)
   lines.push(...bodyLines)
   return `${lines.join('\n').trimEnd()}\n`
 }
@@ -1015,7 +1334,23 @@ function renderGoInterface(
   const lines: string[] = []
   pushDocGo(lines, component.description ?? `Generated from ${ref}.`, component.name)
   lines.push(`type ${component.name} interface {`)
+  // Go does not support method overloading, so two methods with the same
+  // name within an interface (legal in Java/Spring specs) collapse to
+  // one. We keep the first occurrence and skip the rest; the dropped
+  // method's signature is preserved as a comment so reviewers see the
+  // overload exists. The spec author should split the overload into two
+  // distinct method names if both signatures need to be callable from Go.
+  const seenMethods = new Set<string>()
   for (const m of component.methods) {
+    const methodKey = pascalCase(m.name)
+    if (seenMethods.has(methodKey)) {
+      lines.push(
+        `\t// SKIPPED OVERLOAD: ${m.name} — Go interfaces cannot have two methods with the same name.`,
+      )
+      lines.push(`\t// ${renderGoMethodSignature(m, imports)}`)
+      continue
+    }
+    seenMethods.add(methodKey)
     if (m.description) lines.push(`\t// ${m.description.replace(/\n/g, ' ')}`)
     lines.push(`\t${renderGoMethodSignature(m, imports)}`)
   }
@@ -1031,7 +1366,17 @@ function renderGoMethodSignature(m: Method, imports: Set<string>): string {
       return `${camelCase(p.name)} ${isPtr ? `*${goType}` : goType}`
     })
     .join(', ')
-  const ret = mapGoType(m.returns, imports)
+  // A trailing `?` on the return type (`WsOutgoingMessage?`) marks the
+  // return as nullable. Idiomatic Go for "may be absent" is a pointer
+  // type; `mapGoType` strips the `?` itself, so we detect it here and
+  // wrap the result. Slice / map / `any` returns stay as-is because their
+  // zero value already encodes "absent".
+  const returnsTrimmed = m.returns.trim()
+  const returnNullable = returnsTrimmed.endsWith('?') && !returnsTrimmed.endsWith('[]?')
+  let ret = mapGoType(m.returns, imports)
+  if (returnNullable && ret && !ret.startsWith('[]') && !ret.startsWith('map[') && ret !== 'any') {
+    ret = `*${ret}`
+  }
   // `void` → just an error. Anything else → (Type, error). This keeps the
   // generated interface usable in idiomatic Go without breaking when the
   // spec stays language-neutral.

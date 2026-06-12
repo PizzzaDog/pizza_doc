@@ -59,6 +59,8 @@ export type ValidationCode =
   | 'EXTERNAL_DEP_ARG_CONTRACT_INVALID'
   | 'ADR_BROKEN_LINK'
   | 'ADR_DUPLICATE_ID'
+  | 'TOOL_SCHEMA_TOPLEVEL_COMBINATOR'
+  | 'ADR_EMBEDS_SCHEMA_LITERAL'
   // 3.8 drift (v0.3 — code↔spec coverage; only emitted by `pd drift --from-jsonl`)
   | 'CONFIG_REF_NOT_IN_SPEC'
   | 'EXTERNAL_CALL_NOT_IN_SPEC'

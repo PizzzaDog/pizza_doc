@@ -481,6 +481,39 @@ const DOCS: Record<ValidationCode, CodeDoc> = {
     ],
     fix: 'Renumber one of them (and rename the file accordingly). ADR ids must be globally unique.',
   },
+  TOOL_SCHEMA_TOPLEVEL_COMBINATOR: {
+    severity: 'warning',
+    pass: 'semantic',
+    summary:
+      'A model/component declares an MCP/tool input schema whose root uses oneOf/anyOf/allOf/not.',
+    causes: [
+      'Encoded exactly-one-of arguments directly in a tool inputSchema root.',
+      'Copied a JSON Schema that is valid generally but not accepted by Claude Code tool registration.',
+      'The schedule_create incident: Claude Code silently dropped the tool when root oneOf reached the registry.',
+    ],
+    example:
+      'inputSchema:\n' +
+      '  type: object\n' +
+      '  properties:\n' +
+      '    at: { type: string }\n' +
+      '    every: { type: string }\n' +
+      '  oneOf:\n' +
+      '    - required: [at]\n' +
+      '    - required: [every]',
+    fix: 'Keep the inputSchema root a plain object. Put required/properties at the root, document mutually-exclusive fields in descriptions, and enforce the invariant server-side in the tool handler.',
+  },
+  ADR_EMBEDS_SCHEMA_LITERAL: {
+    severity: 'info',
+    pass: 'semantic',
+    summary:
+      'An ADR fenced json/yaml block duplicates at least six consecutive lines from a model YAML file.',
+    causes: [
+      'Binding wire/model literals were copied into prose instead of referenced by path.',
+      'A contract fix now has to be applied in both the YAML and ADR, creating drift risk.',
+      'The oneOf incident fix had to chase the same literal in multiple places.',
+    ],
+    fix: 'Move the binding literal to the model YAML only. In the ADR, link to or name the exact YAML path and describe the decision in prose.',
+  },
   CONFIG_REF_NOT_IN_SPEC: {
     severity: 'error',
     pass: 'semantic',

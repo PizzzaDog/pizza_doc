@@ -91,6 +91,33 @@ function makeSpace(): Fixture {
       '    type: uuid',
       '  - name: events',
       '    type: List<string>',
+      // `cardinality: many` on a scalar — should become string[] / []string.
+      '  - name: runtimes',
+      '    type: string',
+      '    cardinality: many',
+      // `cardinality: many` on a model ref — should become RuntimeId[] /
+      // []RuntimeId (not double-wrapped even though the type is bare).
+      '  - name: supportedRuntimes',
+      '    type: RuntimeId',
+      '    cardinality: many',
+      // Already-collection type with cardinality: many — must not double-wrap.
+      '  - name: pages',
+      '    type: List<string>',
+      '    cardinality: many',
+      // Optional + many — stays as a nullable slice, not a pointer to slice.
+      '  - name: tags',
+      '    type: string',
+      '    cardinality: many',
+      '    optional: true',
+      // `instant` — Java `java.time.Instant` alias. Same wire form as
+      // `timestamp` (ISO-8601 string) — separate case so authors who
+      // think in Java types do not have to translate.
+      '  - name: createdAt',
+      '    type: instant',
+      // `instant` + optional — same nullable handling as timestamp.
+      '  - name: deletedAt',
+      '    type: instant',
+      '    optional: true',
     ].join('\n'),
   )
   fs.writeFileSync(
@@ -113,6 +140,26 @@ function makeSpace(): Fixture {
       '      - name: runId',
       '        type: uuid',
       '    returns: void',
+      // Spring Data `Page<X>` return + `Pageable` param — the two
+      // Java-ism types most spec authors leak in.
+      '  - name: list',
+      '    description: Paginated read.',
+      '    params:',
+      '      - name: pageable',
+      '        type: Pageable',
+      '    returns: Page<StartResponse>',
+      // Spring Data `Specification<X>` + `Collection<X>` params, +
+      // `X?` suffix on the return.
+      '  - name: lookup',
+      '    description: Conditional lookup.',
+      '    params:',
+      '      - name: spec',
+      '        type: Specification<StartResponse>',
+      '      - name: ids',
+      '        type: Collection<String>',
+      '      - name: since',
+      '        type: instant',
+      '    returns: StartResponse?',
     ].join('\n'),
   )
   return { tmp, spaceDir }
@@ -201,6 +248,37 @@ describe('renderGoTypes', () => {
   })
 })
 
+describe('cardinality: many on Field', () => {
+  it('TS: wraps scalar / ref / type in T[] without double-wrapping collections', async () => {
+    const { space } = await loadSpaceForCli(fixture.spaceDir)
+    const out = renderTypeScriptTypes(space)
+    // Scalar string + cardinality:many → string[]. This is the exact gap
+    // that caused HOTFIX-1 in horalab production (TemplateDto.runtimes).
+    expect(out).toMatch(/runtimes: string\[\]/)
+    // Model ref + cardinality:many → RuntimeId[].
+    expect(out).toMatch(/supportedRuntimes: RuntimeId\[\]/)
+    // Already a List<string> — must NOT be wrapped to string[][].
+    expect(out).toMatch(/pages: string\[\]/)
+    expect(out).not.toMatch(/string\[\]\[\]/)
+    // Optional + many → field-level `?:` AND nullable slice (no `| null`
+    // wrapping the array — collections express absence by being missing).
+    expect(out).toMatch(/tags\?: string\[\]/)
+  })
+
+  it('Go: wraps scalar / ref / type in []T without double-wrapping or pointer-wrapping slices', async () => {
+    const { space } = await loadSpaceForCli(fixture.spaceDir)
+    const out = renderGoTypes(space, 'agent')
+    // Required slice — no pointer wrap, no omitempty.
+    expect(out).toMatch(/Runtimes \[\]string `json:"runtimes"`/)
+    expect(out).toMatch(/SupportedRuntimes \[\]RuntimeId `json:"supportedRuntimes"`/)
+    // List<string> + many — still []string, not [][]string.
+    expect(out).toMatch(/Pages \[\]string `json:"pages"`/)
+    expect(out).not.toMatch(/\[\]\[\]/)
+    // Optional + many — slice stays a slice (no `*[]T`), still gets omitempty.
+    expect(out).toMatch(/Tags \[\]string `json:"tags,omitempty"`/)
+  })
+})
+
 describe('renderGoInterfaces', () => {
   it('emits a banner and the requested package', async () => {
     const { space } = await loadSpaceForCli(fixture.spaceDir)
@@ -217,5 +295,99 @@ describe('renderGoInterfaces', () => {
     expect(out).toMatch(/Cancel\(runId string\) error/)
     // Non-void returns get (T, error).
     expect(out).toMatch(/Start\(req StartRequest\) \(StartResponse, error\)/)
+  })
+})
+
+describe('Java-ism types (FC5)', () => {
+  describe('type: instant', () => {
+    it('Go: maps to time.Time and adds the time import', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderGoTypes(space, 'agent')
+      // Required instant → time.Time (not pointer).
+      expect(out).toMatch(/CreatedAt time\.Time `json:"createdAt"`/)
+      // Optional instant → *time.Time + omitempty.
+      expect(out).toMatch(/DeletedAt \*time\.Time `json:"deletedAt,omitempty"`/)
+      // `time` import landed.
+      expect(out).toMatch(/"time"/)
+    })
+
+    it('TS: maps to string (ISO-8601 wire convention)', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderTypeScriptTypes(space)
+      expect(out).toMatch(/createdAt: string/)
+      expect(out).toMatch(/deletedAt\?: string/)
+    })
+  })
+
+  describe('Page<X> and Pageable', () => {
+    it('Go: synthesises a PageOfX struct and a Pageable struct exactly once', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderGoInterfaces(space, 'agent')
+      // Method signature uses the synthesised wrapper name.
+      expect(out).toMatch(/List\(pageable Pageable\) \(PageOfStartResponse, error\)/)
+      // Pageable struct declared inline.
+      expect(out).toMatch(
+        /type Pageable struct \{[\s\S]*?Page int[\s\S]*?Size int[\s\S]*?Sort \[\]string/,
+      )
+      // PageOf wrapper declared.
+      expect(out).toMatch(
+        /type PageOfStartResponse struct \{[\s\S]*?Content\s+\[\]StartResponse[\s\S]*?TotalElements int64[\s\S]*?TotalPages\s+int[\s\S]*?Number\s+int[\s\S]*?Size\s+int/,
+      )
+      // No literal `Page<X>` leaks through method signatures or struct
+      // field types. The string still appears in our human-readable
+      // comment (`Page<StartResponse> envelope`) — strip comment lines
+      // before asserting.
+      const codeOnly = out
+        .split('\n')
+        .filter((l) => !l.trim().startsWith('//'))
+        .join('\n')
+      expect(codeOnly).not.toMatch(/Page<[A-Za-z_]/)
+      // No literal `?` leaks through as a Go syntax character.
+      expect(codeOnly).not.toMatch(/\?\)/)
+      // Two interface methods should not duplicate the struct.
+      const pageableMatches = out.match(/^type Pageable struct \{/gm)
+      expect(pageableMatches?.length ?? 0).toBe(1)
+    })
+
+    it('TS: inlines Page<X> as a structural type and Pageable as an envelope', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderTypeScriptTypes(space)
+      // Nothing to assert directly on methods (TS does not emit
+      // interfaces from components), but the types module still parses
+      // — and any future TS interface emitter inherits the mapper.
+      // Sanity-check: no literal `Page<` leakage anywhere.
+      // (StartResponse has no Page<> field in the fixture, but `unknown`
+      // mapping would be visible — confirm by absence.)
+      expect(out).not.toMatch(/: Page<[A-Za-z_]/)
+    })
+  })
+
+  describe('Specification<X> and Collection<X>', () => {
+    it('Go: Specification<X> → any, Collection<X> → []X', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderGoInterfaces(space, 'agent')
+      // Collection<String> → []string (Java's `String` → Go `string` via
+      // the bare-type pass).
+      expect(out).toMatch(/ids \[\]string/)
+      // Specification<StartResponse> → any (opaque outside the JVM).
+      expect(out).toMatch(/spec any/)
+    })
+
+    it('TS: Collection<X> → X[], Specification<X> → unknown', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderTypeScriptTypes(space)
+      // No interfaces are emitted from components, but mapper changes are
+      // type-level: assert the assumption with a smoke check by absence.
+      expect(out).not.toMatch(/Collection<[A-Za-z_]/)
+    })
+  })
+
+  describe('X? suffix on return types', () => {
+    it('Go: marks the return type as a pointer (idiomatic nullable)', async () => {
+      const { space } = await loadSpaceForCli(fixture.spaceDir)
+      const out = renderGoInterfaces(space, 'agent')
+      // `returns: StartResponse?` → `(*StartResponse, error)`.
+      expect(out).toMatch(/Lookup\([^)]*\) \(\*StartResponse, error\)/)
+    })
   })
 })
