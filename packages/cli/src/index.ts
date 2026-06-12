@@ -152,6 +152,7 @@ ${bold('quality gates:')}
   ${cyan('readiness')}     [<dir>] [--profile production] [--min-endpoints 100] ...
                                 [--drift-from-jsonl <file>]
                                 [--check-anchors] [--require-anchors] [--code-root <dir>]
+                                [--module-root <id>=<dir>]...
                                   opt-in anchor gate: every sourceRef resolves to a real file
   ${cyan('coverage')}      [<dir>] [--min-components 80] ...
   ${cyan('orphans')}       [<dir>] [--kind components|models|tables|endpoints]
@@ -160,9 +161,12 @@ ${bold('quality gates:')}
   ${cyan('diff')}          <git-ref> [<dir>]
   ${cyan('diff')}          --change <id> [<dir>]
   ${cyan('drift')}         --from-jsonl <code-extract.jsonl> [<dir>]
-  ${cyan('anchors')}       [<dir>] [--code-root <dir>] [--require-all] [--json]
+  ${cyan('anchors')}       [<dir>] [--code-root <dir>] [--module-root <id>=<dir>]...
+                                [--require-all] [--json]
                                 deterministic spec↔code check: every sourceRef
-                                resolves to a real file (no LLM, CI-friendly)
+                                resolves to a real file (no LLM, CI-friendly).
+                                --module-root maps a module to its own repo
+                                (tried first, falls back to --code-root)
   ${cyan('doctor')}        [<dir>] [--fix-ci]
                                 advisory checklist: git presence, language hint,
                                 flag suggestions, CI workflow scaffold

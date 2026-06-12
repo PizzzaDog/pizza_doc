@@ -23,12 +23,38 @@ export interface AnchorIssue {
 
 export interface AnchorResult {
   codeRoot: string
+  /** Per-module roots as given (relative entries resolve against codeRoot). */
+  moduleRoots: Record<string, string>
+  /** Mapping keys that match no module in the space — likely typos. */
+  unknownModuleRoots: string[]
   /** How many sourceRef anchors were inspected. */
   checked: number
   /** How many resolved to a real file (stale-line counts as resolved). */
   resolved: number
   /** broken + stale-line issues. `missing` is computed separately. */
   issues: AnchorIssue[]
+}
+
+/**
+ * Parse repeatable `--module-root <module-id>=<dir>` values into a mapping.
+ * Malformed specs are reported, not thrown, so commands can exit with a
+ * usage error message.
+ */
+export function parseModuleRootSpecs(specs: readonly string[]): {
+  roots: Record<string, string>
+  errors: string[]
+} {
+  const roots: Record<string, string> = {}
+  const errors: string[] = []
+  for (const spec of specs) {
+    const eq = spec.indexOf('=')
+    if (eq <= 0 || eq === spec.length - 1) {
+      errors.push(`--module-root expects <module-id>=<dir>, got '${spec}'`)
+      continue
+    }
+    roots[spec.slice(0, eq)] = spec.slice(eq + 1)
+  }
+  return { roots, errors }
 }
 
 /**
@@ -44,22 +70,43 @@ export function parseSourceRef(sourceRef: string): { filePath: string; line?: nu
 }
 
 /**
- * Resolve every `sourceRef` in the space against `codeRoot`: the file must
- * exist, and a cited `:line` must be in range. Pure of CLI/printing
- * concerns so both the command and the readiness gate can share it.
+ * Resolve every `sourceRef` in the space: the file must exist, and a cited
+ * `:line` must be in range. Pure of CLI/printing concerns so both the
+ * command and the readiness gate can share it.
+ *
+ * Multi-repo workspaces map modules to their own checkouts via
+ * `moduleRoots` (module id → dir, relative entries resolve against
+ * `codeRoot`). A mapped module's anchors try the module root FIRST and fall
+ * back to `codeRoot` — real spaces mix module-relative refs
+ * (`src/main/java/...`) with workspace-relative ones (`backend/src/...`),
+ * and only the fallback keeps both resolving. No mapping = single-root
+ * behaviour, unchanged.
  */
-export function resolveAnchors(space: Space, codeRoot: string): AnchorResult {
+export function resolveAnchors(
+  space: Space,
+  codeRoot: string,
+  moduleRoots: Record<string, string> = {},
+): AnchorResult {
   const issues: AnchorIssue[] = []
   const lineCache = new Map<string, number | null>() // abs path → line count, or null if unreadable
+  const moduleIds = new Set(space.modules.map((m) => m.id))
+  const unknownModuleRoots = Object.keys(moduleRoots).filter((id) => !moduleIds.has(id))
   let checked = 0
   let resolved = 0
 
-  for (const { ref, sourceRef } of allSourceRefs(space)) {
+  for (const { ref, sourceRef, moduleId } of allSourceRefs(space)) {
     checked++
     const { filePath, line } = parseSourceRef(sourceRef)
-    const abs = path.resolve(codeRoot, filePath)
-    if (!fs.existsSync(abs)) {
-      issues.push({ severity: 'broken', ref, sourceRef, reason: 'file not found' })
+    const moduleRoot = moduleId === undefined ? undefined : moduleRoots[moduleId]
+    const tryRoots =
+      moduleRoot === undefined ? [codeRoot] : [path.resolve(codeRoot, moduleRoot), codeRoot]
+    const abs = tryRoots.map((root) => path.resolve(root, filePath)).find((p) => fs.existsSync(p))
+    if (abs === undefined) {
+      const reason =
+        moduleRoot === undefined
+          ? 'file not found'
+          : `file not found (tried module root '${moduleRoot}', then code root)`
+      issues.push({ severity: 'broken', ref, sourceRef, reason })
       continue
     }
     if (line !== undefined) {
@@ -79,7 +126,7 @@ export function resolveAnchors(space: Space, codeRoot: string): AnchorResult {
     resolved++
   }
 
-  return { codeRoot, checked, resolved, issues }
+  return { codeRoot, moduleRoots, unknownModuleRoots, checked, resolved, issues }
 }
 
 /** Component / model / table entities that carry no sourceRef at all. */

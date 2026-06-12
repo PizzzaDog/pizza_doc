@@ -3,9 +3,10 @@ import {
   type AnchorIssue,
   collectMissingAnchors,
   gitToplevel,
+  parseModuleRootSpecs,
   resolveAnchors,
 } from '../util/anchors.js'
-import type { ParsedArgs } from '../util/args.js'
+import { type ParsedArgs, getRepeatableFlag } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
 import { loadSpaceForCli } from '../util/load.js'
 import { resolveSpaceDir } from '../util/space-path.js'
@@ -14,7 +15,8 @@ import { resolveSpaceDir } from '../util/space-path.js'
 export { parseSourceRef } from '../util/anchors.js'
 
 /**
- * `pd anchors [<dir>] [--code-root <dir>] [--require-all] [--json]`
+ * `pd anchors [<dir>] [--code-root <dir>] [--module-root <id>=<dir>]...
+ *             [--require-all] [--json]`
  *
  * Deterministic spec↔code anchor checker. Walks every `sourceRef` in the
  * space and verifies it resolves to a real file under `--code-root`
@@ -33,6 +35,13 @@ export { parseSourceRef } from '../util/anchors.js'
  *   --code-root <dir>  Root the (relative) sourceRef paths resolve against.
  *                      Default: `git rev-parse --show-toplevel` of the space
  *                      dir; falls back to cwd when not in a git repo.
+ *   --module-root <module-id>=<dir>
+ *                      Repeatable. Multi-repo workspaces: anchors owned by
+ *                      that module resolve against <dir> first (relative to
+ *                      --code-root), then fall back to --code-root. E.g.
+ *                      `--module-root backend=horalab-be`. Mapping an id
+ *                      that isn't a module in the space prints a warning.
+ *                      Without the flag, single-root behaviour is unchanged.
  *   --require-all      Also flag component / model / table entities that
  *                      carry NO sourceRef at all (adoption gate). Off by
  *                      default so design-first spaces (no code yet) pass.
@@ -49,6 +58,14 @@ export async function cmdAnchors(args: ParsedArgs): Promise<number> {
   const requireAll = args.flags['require-all'] === true
   const asJson = args.flags.json === true
 
+  const { roots: moduleRootsSpec, errors: rootErrors } = parseModuleRootSpecs(
+    getRepeatableFlag(args, 'module-root'),
+  )
+  if (rootErrors.length > 0) {
+    for (const e of rootErrors) console.error(red(e))
+    return 2
+  }
+
   const { space } = await loadSpaceForCli(dir)
 
   const codeRoot =
@@ -56,7 +73,11 @@ export async function cmdAnchors(args: ParsedArgs): Promise<number> {
       ? path.resolve(args.flags['code-root'])
       : (gitToplevel(dir) ?? process.cwd())
 
-  const { checked, resolved, issues } = resolveAnchors(space, codeRoot)
+  const { moduleRoots, unknownModuleRoots, checked, resolved, issues } = resolveAnchors(
+    space,
+    codeRoot,
+    moduleRootsSpec,
+  )
   const allIssues: AnchorIssue[] = [...issues]
   let missing = 0
   if (requireAll) {
@@ -71,7 +92,17 @@ export async function cmdAnchors(args: ParsedArgs): Promise<number> {
   if (asJson) {
     console.log(
       JSON.stringify(
-        { codeRoot, checked, resolved, broken, staleLines, missing, issues: allIssues },
+        {
+          codeRoot,
+          moduleRoots,
+          unknownModuleRoots,
+          checked,
+          resolved,
+          broken,
+          staleLines,
+          missing,
+          issues: allIssues,
+        },
         null,
         2,
       ),
@@ -80,6 +111,13 @@ export async function cmdAnchors(args: ParsedArgs): Promise<number> {
   }
 
   console.log(`${bold(cyan(`anchors: ${space.meta.id}`))}  ${dim(`code-root ${codeRoot}`)}`)
+  const rootEntries = Object.entries(moduleRoots)
+  if (rootEntries.length > 0) {
+    console.log(dim(`  module roots: ${rootEntries.map(([id, p]) => `${id} → ${p}`).join(' · ')}`))
+  }
+  for (const id of unknownModuleRoots) {
+    console.log(yellow(`  --module-root '${id}' matches no module in this space (typo?)`))
+  }
   if (checked === 0 && !requireAll) {
     console.log(
       dim(
@@ -93,8 +131,8 @@ export async function cmdAnchors(args: ParsedArgs): Promise<number> {
   const parts = [
     `${checked} anchor${checked === 1 ? '' : 's'} checked`,
     green(`${resolved} resolved`),
+    broken > 0 ? red(`${broken} broken`) : green('0 broken'),
   ]
-  if (broken > 0) parts.push(red(`${broken} broken`))
   if (staleLines > 0) parts.push(yellow(`${staleLines} stale line${staleLines === 1 ? '' : 's'}`))
   if (requireAll) parts.push(missing > 0 ? yellow(`${missing} missing`) : green('0 missing'))
   console.log(`  ${parts.join(' · ')}`)

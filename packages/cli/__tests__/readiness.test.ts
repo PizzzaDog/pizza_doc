@@ -56,6 +56,40 @@ describe('pd readiness — anchor gate (opt-in)', () => {
     ).resolves.toBe(1)
   })
 
+  it('--module-root maps a module to its own checkout under the anchor gate', async () => {
+    const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'pd-readiness-modroot-'))
+    try {
+      // Single-space layout: folder name must equal space.yaml meta.id.
+      const spaceDir = nodePath.join(tmp, 'readiness-production-ready')
+      fs.cpSync(READY, spaceDir, { recursive: true })
+      // The module's code lives in its own checkout under the workspace root,
+      // and the anchors are authored module-relative.
+      fs.mkdirSync(nodePath.join(tmp, 'api-checkout', 'src'), { recursive: true })
+      fs.writeFileSync(nodePath.join(tmp, 'api-checkout', 'src', 'main.ts'), 'x\n'.repeat(20))
+      fs.writeFileSync(
+        nodePath.join(tmp, 'api-checkout', 'src', 'preflight.ts'),
+        'export const x = 1\n',
+      )
+      rewrite(
+        nodePath.join(spaceDir, 'modules', 'api', 'components', 'AppRoot.yaml'),
+        'services/api/src/main.ts:12',
+        'src/main.ts:12',
+      )
+      rewrite(
+        nodePath.join(spaceDir, 'modules', 'api', 'external-deps.yaml'),
+        'services/api/src/preflight.ts#checkTemplates',
+        'src/preflight.ts',
+      )
+      const base = ['readiness', spaceDir, '--profile', 'production', '--code-root', tmp]
+      // Module-relative anchors don't resolve from the workspace root alone…
+      await expect(runCli(base)).resolves.toBe(1)
+      // …and do once the module is mapped to its checkout.
+      await expect(runCli([...base, '--module-root', 'api=api-checkout'])).resolves.toBe(0)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
   it('--check-anchors --code-root passes when every sourceRef resolves', async () => {
     const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'pd-readiness-anchor-'))
     try {

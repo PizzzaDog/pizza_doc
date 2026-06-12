@@ -37,6 +37,9 @@ describe('pd anchors', () => {
     vi.spyOn(console, 'log').mockImplementation((m?: unknown) => {
       logs.push(String(m))
     })
+    vi.spyOn(console, 'error').mockImplementation((m?: unknown) => {
+      logs.push(String(m))
+    })
   })
 
   afterEach(() => {
@@ -62,6 +65,7 @@ describe('pd anchors', () => {
     broken: number
     staleLines: number
     missing: number
+    unknownModuleRoots: string[]
     issues: Array<{ severity: string; ref: string; reason: string }>
   } {
     const json = logs.find((l) => l.trim().startsWith('{'))
@@ -122,6 +126,53 @@ describe('pd anchors', () => {
     expect(
       r.issues.some((i) => i.severity === 'missing' && i.ref === 'module:api/model:User'),
     ).toBe(true)
+  })
+
+  // --module-root: multi-repo workspaces where the space lives in an
+  // aggregate root but modules are their own checkouts in subfolders.
+  it('module-relative sourceRef breaks on a single code-root and resolves with --module-root', async () => {
+    fs.mkdirSync(path.join(tmp, 'be', 'lib'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'be', 'lib', 'Impl.ts'), 'export const impl = 1\n')
+    writeModel('lib/Impl.ts') // valid only relative to <tmp>/be
+
+    expect(await run()).toBe(1)
+    expect(report().broken).toBe(1)
+
+    logs = []
+    expect(await run('--module-root', 'api=be')).toBe(0)
+    const r = report()
+    expect(r.resolved).toBe(1)
+    expect(r.broken).toBe(0)
+  })
+
+  it('a genuinely broken ref stays broken even with a module-root mapping', async () => {
+    fs.mkdirSync(path.join(tmp, 'be'), { recursive: true })
+    writeModel('lib/Ghost.ts')
+    expect(await run('--module-root', 'api=be')).toBe(1)
+    const r = report()
+    expect(r.broken).toBe(1)
+    expect(r.issues[0]?.reason).toContain("tried module root 'be'")
+  })
+
+  it('falls back to --code-root, so workspace-relative refs in a mapped module still resolve', async () => {
+    fs.mkdirSync(path.join(tmp, 'be'), { recursive: true })
+    writeModel('src/User.ts') // valid relative to <tmp>, NOT to <tmp>/be
+    expect(await run('--module-root', 'api=be')).toBe(0)
+    expect(report().resolved).toBe(1)
+  })
+
+  it('repeats --module-root and warns on a mapping that matches no module', async () => {
+    fs.mkdirSync(path.join(tmp, 'be', 'lib'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'be', 'lib', 'Impl.ts'), 'export const impl = 1\n')
+    writeModel('lib/Impl.ts')
+    expect(await run('--module-root', 'api=be', '--module-root', 'ghost=nowhere')).toBe(0)
+    expect(report().unknownModuleRoots).toEqual(['ghost'])
+  })
+
+  it('exit 2 on a malformed --module-root spec', async () => {
+    writeModel('src/User.ts')
+    expect(await run('--module-root', 'api')).toBe(2)
+    expect(logs.join('\n')).toContain('--module-root expects <module-id>=<dir>')
   })
 
   it('walks nested anchors like entrypoint.sourceRef, not just top-level ones', async () => {

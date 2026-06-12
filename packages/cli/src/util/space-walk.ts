@@ -86,6 +86,8 @@ export interface AnchorCtx {
   ref: string
   /** The raw `sourceRef` string as authored (path, optionally `:line`). */
   sourceRef: string
+  /** Owning module id; absent for module-less owners (use cases). */
+  moduleId?: string
 }
 
 /**
@@ -101,43 +103,52 @@ export interface AnchorCtx {
  * free; module-level operations surfaces are iterated directly.
  */
 export function* allSourceRefs(space: Space): Generator<AnchorCtx> {
-  for (const { component, ref } of allComponents(space)) {
-    if (component.sourceRef) yield { ref, sourceRef: component.sourceRef }
+  for (const { component, module, ref } of allComponents(space)) {
+    const moduleId = module.id
+    if (component.sourceRef) yield { ref, sourceRef: component.sourceRef, moduleId }
     for (const m of component.methods) {
       const mref = `${ref}/method:${m.name}`
-      if (m.sourceRef) yield { ref: mref, sourceRef: m.sourceRef }
+      if (m.sourceRef) yield { ref: mref, sourceRef: m.sourceRef, moduleId }
       for (const p of m.params) {
-        if (p.sourceRef) yield { ref: `${mref}/param:${p.name}`, sourceRef: p.sourceRef }
+        if (p.sourceRef) yield { ref: `${mref}/param:${p.name}`, sourceRef: p.sourceRef, moduleId }
       }
     }
     for (const r of component.routes) {
-      if (r.sourceRef) yield { ref: `${ref}/route:${r.method} ${r.path}`, sourceRef: r.sourceRef }
+      if (r.sourceRef) {
+        yield { ref: `${ref}/route:${r.method} ${r.path}`, sourceRef: r.sourceRef, moduleId }
+      }
     }
     for (const e of component.emits) {
-      if (e.sourceRef) yield { ref: `${ref}/emits:${e.event}`, sourceRef: e.sourceRef }
+      if (e.sourceRef) yield { ref: `${ref}/emits:${e.event}`, sourceRef: e.sourceRef, moduleId }
     }
     for (const s of component.subscribes) {
-      if (s.sourceRef) yield { ref: `${ref}/subscribes:${s.event}`, sourceRef: s.sourceRef }
+      if (s.sourceRef) {
+        yield { ref: `${ref}/subscribes:${s.event}`, sourceRef: s.sourceRef, moduleId }
+      }
     }
     if (component.entrypoint?.sourceRef) {
-      yield { ref: `${ref}/entrypoint`, sourceRef: component.entrypoint.sourceRef }
+      yield { ref: `${ref}/entrypoint`, sourceRef: component.entrypoint.sourceRef, moduleId }
     }
   }
 
-  for (const { model, ref } of allModels(space)) {
-    if (model.sourceRef) yield { ref, sourceRef: model.sourceRef }
+  for (const { model, module, ref } of allModels(space)) {
+    const moduleId = module.id
+    if (model.sourceRef) yield { ref, sourceRef: model.sourceRef, moduleId }
     for (const f of model.fields) {
-      if (f.sourceRef) yield { ref: `${ref}/field:${f.name}`, sourceRef: f.sourceRef }
+      if (f.sourceRef) yield { ref: `${ref}/field:${f.name}`, sourceRef: f.sourceRef, moduleId }
     }
   }
 
-  for (const { table, ref } of allTables(space)) {
-    if (table.sourceRef) yield { ref, sourceRef: table.sourceRef }
+  for (const { table, module, ref } of allTables(space)) {
+    const moduleId = module.id
+    if (table.sourceRef) yield { ref, sourceRef: table.sourceRef, moduleId }
     for (const c of table.columns) {
-      if (c.sourceRef) yield { ref: `${ref}/column:${c.name}`, sourceRef: c.sourceRef }
+      if (c.sourceRef) yield { ref: `${ref}/column:${c.name}`, sourceRef: c.sourceRef, moduleId }
     }
     for (const mig of table.migrations) {
-      if (mig.sourceRef) yield { ref: `${ref}/migration:${mig.id}`, sourceRef: mig.sourceRef }
+      if (mig.sourceRef) {
+        yield { ref: `${ref}/migration:${mig.id}`, sourceRef: mig.sourceRef, moduleId }
+      }
     }
   }
 
@@ -146,44 +157,51 @@ export function* allSourceRefs(space: Space): Generator<AnchorCtx> {
   }
 
   for (const mod of space.modules) {
+    const moduleId = mod.id
     for (const em of mod.errorMapping) {
       const eref = `module:${mod.id}/errorMapping:${em.exception}`
-      if (em.sourceRef) yield { ref: eref, sourceRef: em.sourceRef }
+      if (em.sourceRef) yield { ref: eref, sourceRef: em.sourceRef, moduleId }
       if (em.implementationProof?.sourceRef) {
-        yield { ref: `${eref}/proof`, sourceRef: em.implementationProof.sourceRef }
+        yield { ref: `${eref}/proof`, sourceRef: em.implementationProof.sourceRef, moduleId }
       }
     }
     for (const dep of mod.externalDeps) {
       const dref = `module:${mod.id}/external-dep:${dep.name}`
-      if (dep.sourceRef) yield { ref: dref, sourceRef: dep.sourceRef }
+      if (dep.sourceRef) yield { ref: dref, sourceRef: dep.sourceRef, moduleId }
       if (dep.kind === 'http-api') {
         if (dep.preflightCheck?.sourceRef) {
-          yield { ref: `${dref}/preflight`, sourceRef: dep.preflightCheck.sourceRef }
+          yield { ref: `${dref}/preflight`, sourceRef: dep.preflightCheck.sourceRef, moduleId }
         }
         if (dep.driftProbe?.sourceRef) {
-          yield { ref: `${dref}/drift-probe`, sourceRef: dep.driftProbe.sourceRef }
+          yield { ref: `${dref}/drift-probe`, sourceRef: dep.driftProbe.sourceRef, moduleId }
         }
         if (dep.positionalArgs?.contractTest?.sourceRef) {
           yield {
             ref: `${dref}/arg-contract`,
             sourceRef: dep.positionalArgs.contractTest.sourceRef,
+            moduleId,
           }
         }
       }
     }
     for (const entry of mod.configMap) {
       const cref = `module:${mod.id}/config:${entry.key}`
-      if (entry.sourceRef) yield { ref: cref, sourceRef: entry.sourceRef }
+      if (entry.sourceRef) yield { ref: cref, sourceRef: entry.sourceRef, moduleId }
       for (const ds of entry.defaultSources) {
-        if (ds.sourceRef) yield { ref: `${cref}/default`, sourceRef: ds.sourceRef }
+        if (ds.sourceRef) yield { ref: `${cref}/default`, sourceRef: ds.sourceRef, moduleId }
       }
     }
     for (const sm of mod.stateMachines) {
-      if (sm.sourceRef)
-        yield { ref: `module:${mod.id}/state-machine:${sm.id}`, sourceRef: sm.sourceRef }
+      if (sm.sourceRef) {
+        yield { ref: `module:${mod.id}/state-machine:${sm.id}`, sourceRef: sm.sourceRef, moduleId }
+      }
     }
     if (mod.healthContract?.sourceRef) {
-      yield { ref: `module:${mod.id}/health-contract`, sourceRef: mod.healthContract.sourceRef }
+      yield {
+        ref: `module:${mod.id}/health-contract`,
+        sourceRef: mod.healthContract.sourceRef,
+        moduleId,
+      }
     }
   }
 }

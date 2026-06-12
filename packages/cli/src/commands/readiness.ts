@@ -1,8 +1,13 @@
 import * as path from 'node:path'
 import { evaluateReadiness, validate } from '@pizza-doc/core'
 import type { ReadinessIssue, ReadinessMetric, ReadinessOptions, Space } from '@pizza-doc/core'
-import { collectMissingAnchors, gitToplevel, resolveAnchors } from '../util/anchors.js'
-import type { ParsedArgs } from '../util/args.js'
+import {
+  collectMissingAnchors,
+  gitToplevel,
+  parseModuleRootSpecs,
+  resolveAnchors,
+} from '../util/anchors.js'
+import { type ParsedArgs, getRepeatableFlag } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
 import { loadSpaceForCli } from '../util/load.js'
 import { resolveSpaceDir } from '../util/space-path.js'
@@ -64,6 +69,10 @@ export async function cmdReadiness(args: ParsedArgs): Promise<number> {
  *   --check-anchors     turn the gate on (resolves against the default root).
  *   --code-root <dir>   set + turn on; root the sourceRef paths resolve
  *                       against (default: git toplevel of the space, else cwd).
+ *   --module-root <id>=<dir>
+ *                       set + turn on; repeatable. Multi-repo workspaces:
+ *                       that module's anchors resolve against <dir> first
+ *                       (relative to the code root), then fall back to it.
  *   --require-anchors    turn on + additionally fail on code-backed entities
  *                       (component / model / table) that carry no sourceRef.
  *
@@ -75,13 +84,28 @@ function runAnchorGate(args: ParsedArgs, space: Space, dir: string): boolean {
   const explicitRoot = typeof args.flags['code-root'] === 'string'
   const requireAnchors = args.flags['require-anchors'] === true
   const checkAnchors = args.flags['check-anchors'] === true
-  if (!explicitRoot && !requireAnchors && !checkAnchors) return true
+  const moduleRootSpecs = getRepeatableFlag(args, 'module-root')
+  if (!explicitRoot && !requireAnchors && !checkAnchors && moduleRootSpecs.length === 0) {
+    return true
+  }
+
+  const { roots: moduleRootsSpec, errors: rootErrors } = parseModuleRootSpecs(moduleRootSpecs)
+  if (rootErrors.length > 0) {
+    console.log(`\n${bold(cyan('anchor gate:'))}`)
+    for (const e of rootErrors) console.log(`  ${red(e)}`)
+    console.log(`\n${red('✗')} anchor gate failed`)
+    return false
+  }
 
   const codeRoot = explicitRoot
     ? path.resolve(args.flags['code-root'] as string)
     : (gitToplevel(dir) ?? process.cwd())
 
-  const { checked, resolved, issues } = resolveAnchors(space, codeRoot)
+  const { moduleRoots, unknownModuleRoots, checked, resolved, issues } = resolveAnchors(
+    space,
+    codeRoot,
+    moduleRootsSpec,
+  )
   const missing = requireAnchors ? collectMissingAnchors(space) : []
 
   if (checked === 0 && missing.length === 0) return true
@@ -90,6 +114,13 @@ function runAnchorGate(args: ParsedArgs, space: Space, dir: string): boolean {
   const staleLines = issues.filter((i) => i.severity === 'stale-line')
 
   console.log(`\n${bold(cyan('anchor gate:'))}  ${dim(`code-root ${codeRoot}`)}`)
+  const rootEntries = Object.entries(moduleRoots)
+  if (rootEntries.length > 0) {
+    console.log(dim(`  module roots: ${rootEntries.map(([id, p]) => `${id} → ${p}`).join(' · ')}`))
+  }
+  for (const id of unknownModuleRoots) {
+    console.log(yellow(`  --module-root '${id}' matches no module in this space (typo?)`))
+  }
   const parts = [`${checked} checked`, green(`${resolved} resolved`)]
   if (broken.length > 0) parts.push(red(`${broken.length} broken`))
   if (staleLines.length > 0) parts.push(yellow(`${staleLines.length} stale`))

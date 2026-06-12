@@ -66,6 +66,18 @@ flags component / model / table entities that carry NO sourceRef (adoption
 gate; off by default so design-first spaces still pass). `--json` for
 machine output.
 
+Multi-repo workspaces (space in an aggregate root, modules as separate
+checkouts in subfolders): repeatable `--module-root <id>=<dir>` maps a
+module to its own root. That module's anchors try the module root first,
+then fall back to `--code-root` — real spaces mix module-relative refs
+(`src/main/java/...`) with workspace-relative ones (`backend/src/...`).
+Mapping an id that matches no module warns (typo guard). Same flag works in
+`pd readiness`'s anchor gate. Proven on HoraLab: 355/355 anchors resolve
+with the mapping vs 305/355 from the aggregate root alone. Possible
+follow-up: persist the mapping in the space itself (`meta.moduleRoots`?) —
+that's a schema addition, so it needs its own migration decision here
+first.
+
 ### Phase 2 — anchor-aware readiness  (done)
 
 `pd readiness` gained an opt-in anchor gate (`runAnchorGate` in
