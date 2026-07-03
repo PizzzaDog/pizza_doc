@@ -9,8 +9,13 @@ export * from './changes.js'
 export { serializeSpace } from './serializer.js'
 export * from './validator/index.js'
 export { levenshtein, closestMatches } from './levenshtein.js'
-export { exportSpaceForAi } from './export.js'
-export type { AiExportOptions } from './export.js'
+export { collectBriefContext, exportSpaceForAi, renderImplementationBrief } from './export.js'
+export type {
+  AiExportOptions,
+  BriefComponent,
+  BriefContext,
+  BriefRenderOptions,
+} from './export.js'
 export * from './readiness.js'
 export { buildSequenceModel } from './sequence.js'
 export type {

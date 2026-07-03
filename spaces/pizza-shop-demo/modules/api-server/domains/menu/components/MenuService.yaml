@@ -28,3 +28,5 @@ methods:
       - module:api-server/domain:menu/component:PizzaRepository/method:save
     throws:
       - ValidationException
+      - PizzaNotFoundException
+    description: findById first; an unknown id raises PizzaNotFoundException (the 404 in admin-updates-pizza).

@@ -27,12 +27,14 @@
  */
 
 import { parse as parseYamlValue } from 'yaml'
+import { closestMatches } from '../levenshtein.js'
 import type { LoadedFile } from '../loader.js'
 import type { RefIndex } from '../ref.js'
 import type {
   Column,
   Component,
   ExternalDepEntry,
+  Method,
   Model,
   Module,
   Space,
@@ -120,6 +122,17 @@ export const ALL_SEMANTIC_RULES: ReadonlyArray<{
   { code: 'WIRE_CAPTURE_MISSING', run: ruleWireCaptureMissing },
   // 3.16 Table migration parity (v0.5 — B4)
   { code: 'MIGRATION_COLUMN_INCONSISTENT', run: ruleMigrationColumnInconsistent },
+  // 3.17 Type closure + wiring parity (v0.6 — W1)
+  { code: 'TYPE_UNRESOLVED', run: ruleTypeUnresolved },
+  { code: 'WIRING_STEP_WITHOUT_CALL', run: ruleWiringStepWithoutCall },
+  { code: 'WIRING_CALL_WITHOUT_STEP', run: ruleWiringCallWithoutStep },
+  { code: 'STEP_VIA_MISSING', run: ruleStepViaMissing },
+  // 3.18 Error mapping closure (v0.6 — W5)
+  { code: 'THROWS_UNMAPPED', run: ruleThrowsUnmapped },
+  // 3.19 Event delivery contract (v0.6 — W4)
+  { code: 'EVENT_IDEMPOTENCY_MISSING', run: ruleEventIdempotencyMissing },
+  { code: 'EVENT_KEY_FIELD_UNKNOWN', run: ruleEventKeyFieldUnknown },
+  { code: 'EVENT_DELIVERY_ON_NON_EVENT', run: ruleEventDeliveryOnNonEvent },
 ]
 
 export function validateSemanticPass(
@@ -677,27 +690,41 @@ export function ruleDtoFlowViaTypeMismatch(space: Space, index: RefIndex): Valid
       const viaTarget = index.get(step.via)
       if (!viaTarget || viaTarget.kind !== 'model') continue
       const toTarget = index.get(step.to)
-      if (!toTarget || toTarget.kind !== 'component') continue
-      // Inspect methods; if none has a first param matching the via model name, warn.
       const viaName = viaTarget.entity.name
       const viaId = viaTarget.entity.id
-      const methods = toTarget.entity.methods
-      if (methods.length === 0) continue
       // Real frameworks interleave path/query/header params with the body
       // DTO — Spring's `@PathVariable`s come before `@RequestBody`, Express
       // reads `req.params` before `req.body`, etc. Requiring the DTO to be
       // the FIRST param forces authors to lie about the actual signature.
-      // Check any param slot instead.
-      const match = methods.some((m) =>
-        m.params.some((p) => typeNameMatches(p.type, viaName) || typeNameMatches(p.type, viaId)),
-      )
-      if (!match) {
-        issues.push({
-          severity: 'warning',
-          code: 'DTO_FLOW_VIA_TYPE_MISMATCH',
-          message: `Use case '${uc.id}' step (${scope}) passes via '${viaName}' to component '${toTarget.entity.name}', but no method on the target accepts that DTO as its first parameter.`,
-          entityRef: `usecase:${uc.id}`,
-        })
+      // Check any param slot. A `returns` match is also accepted: `via` on
+      // a response edge (GET flows) legitimately names the response model
+      // rather than a request body.
+      const carriesVia = (m: Method): boolean =>
+        m.params.some((p) => typeNameMatches(p.type, viaName) || typeNameMatches(p.type, viaId)) ||
+        typeNameMatches(m.returns, viaName) ||
+        typeNameMatches(m.returns, viaId)
+      if (toTarget?.kind === 'method') {
+        // Method-level binding is explicit — the author named the exact
+        // handler, so a payload mismatch is a broken contract, not a hint.
+        if (!carriesVia(toTarget.entity)) {
+          issues.push({
+            severity: 'error',
+            code: 'DTO_FLOW_VIA_TYPE_MISMATCH',
+            message: `Use case '${uc.id}' step (${scope}) passes via '${viaName}' to method '${step.to}', but that method neither accepts it as a param nor returns it.`,
+            entityRef: `usecase:${uc.id}`,
+          })
+        }
+      } else if (toTarget?.kind === 'component') {
+        const methods = toTarget.entity.methods
+        if (methods.length === 0) continue
+        if (!methods.some(carriesVia)) {
+          issues.push({
+            severity: 'warning',
+            code: 'DTO_FLOW_VIA_TYPE_MISMATCH',
+            message: `Use case '${uc.id}' step (${scope}) passes via '${viaName}' to component '${toTarget.entity.name}', but no method on the target accepts or returns that DTO.`,
+            entityRef: `usecase:${uc.id}`,
+          })
+        }
       }
     }
   }
@@ -1137,15 +1164,18 @@ function collectUsedDtoFields(space: Space, index: RefIndex): Set<string> {
       }
     }
   }
-  // Any field present in a method's params, for any component referenced by
-  // the space, counts as "used". We do this by scanning all components.
+  // Any field of a model named by a method's params OR `returns` counts as
+  // "used": request DTO fields are consumed by the handler, response DTO
+  // fields by the client on the other side of the wire. Without the returns
+  // leg, `via:` pointing at a response model (GET flows) would flag every
+  // response field as unused.
   for (const ref of index.refs()) {
     const t = index.get(ref)
     if (!t || t.kind !== 'component') continue
     for (const method of t.entity.methods) {
-      for (const param of method.params) {
-        // If param.type is a model, `<ModelName>.<fieldName>` for each of that model's fields is "used".
-        const models = findModelsByName(space, extractBaseType(param.type))
+      const namedTypes = [...method.params.map((p) => p.type), method.returns]
+      for (const declared of namedTypes) {
+        const models = findModelsByName(space, extractBaseType(declared))
         for (const m of models) {
           for (const f of m.fields) used.add(`${m.name}.${f.name}`)
         }
@@ -3268,6 +3298,566 @@ export function ruleWireCaptureMissing(space: Space, _index: RefIndex): Validati
       code: 'WIRE_CAPTURE_MISSING',
       message: `Component '${component.name}' (${componentRef}) consumes external-dep '${depName}' but has no wireCapture. Add a wireCapture pointing at a captured-traffic artefact (tcpdump / curl-live / debug-log) so the contract is pinned to real wire shape.`,
       entityRef: componentRef,
+    })
+  }
+  return issues
+}
+
+// ---------- 3.17 Type closure + wiring parity (v0.6 — W1) ----------
+
+/**
+ * Cross-language primitive / built-in type names (matched lower-cased)
+ * that never need to resolve to a model. Deliberately generous — Java time
+ * types, SQL-ish scalars, TS builtins — because a missed primitive is a
+ * false TYPE_UNRESOLVED error, while an over-broad entry only costs a hole
+ * the size of one word.
+ */
+const PRIMITIVE_TYPE_NAMES: ReadonlySet<string> = new Set([
+  'void',
+  'null',
+  'any',
+  'unknown',
+  'object',
+  'json',
+  'jsonb',
+  'string',
+  'str',
+  'text',
+  'char',
+  'varchar',
+  'uuid',
+  'guid',
+  'id',
+  'int',
+  'integer',
+  'long',
+  'short',
+  'bigint',
+  'smallint',
+  'tinyint',
+  'number',
+  'float',
+  'double',
+  'decimal',
+  'bigdecimal',
+  'byte',
+  'bytes',
+  'binary',
+  'blob',
+  'bool',
+  'boolean',
+  'date',
+  'time',
+  'datetime',
+  'date-time',
+  'timestamp',
+  'instant',
+  'duration',
+  'period',
+  'localdate',
+  'localtime',
+  'localdatetime',
+  'zoneddatetime',
+  'offsetdatetime',
+  'url',
+  'uri',
+  'email',
+  'map',
+  'dict',
+  'record',
+  'list',
+  'set',
+  'array',
+  'collection',
+  'iterable',
+  'tuple',
+  'stream',
+  'file',
+  'multipartfile',
+])
+
+const TYPE_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/
+
+/**
+ * True when `token` is a whitelisted primitive / built-in type name and
+ * never needs to resolve to a model. Shared with the CLI (implementation
+ * briefs run the same closure over the types they render).
+ */
+export function isPrimitiveTypeName(token: string): boolean {
+  return PRIMITIVE_TYPE_NAMES.has(token.toLowerCase())
+}
+
+/** Split on `sep` at angle-bracket depth 0 only (`Map<K, V> | X` safe). */
+function splitTopLevel(s: string, sep: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of s) {
+    if (ch === '<') depth++
+    else if (ch === '>') depth = Math.max(0, depth - 1)
+    if (ch === sep && depth === 0) {
+      parts.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  parts.push(cur)
+  return parts
+}
+
+/**
+ * Decompose a declared type string into the leaf identifiers that must
+ * resolve to a primitive or a model. Wrapper names (`List<…>`, `Mono<…>`,
+ * any `W<…>`) are NOT checked — only their type arguments — because no
+ * whitelist can enumerate every language's container idiom, and a false
+ * error on `Page<Order>` would cost more than a missed typo in a wrapper.
+ * Constructs the parser doesn't understand (dotted FQNs, quotes, braces)
+ * yield no tokens: conservative skip, never a false positive.
+ *
+ * Exported for the CLI: implementation briefs use the same decomposition
+ * to close the type graph they render.
+ */
+export function typeLeafTokens(declared: string): string[] {
+  const out: string[] = []
+  const visit = (raw: string): void => {
+    let t = raw.trim()
+    if (t === '') return
+    const unionParts = splitTopLevel(t, '|')
+    if (unionParts.length > 1) {
+      for (const p of unionParts) visit(p)
+      return
+    }
+    while (t.endsWith('[]')) t = t.slice(0, -2).trimEnd()
+    if (t.endsWith('?')) t = t.slice(0, -1).trimEnd()
+    const generic = t.match(/^[A-Za-z_][A-Za-z0-9_-]*<(.+)>$/s)
+    if (generic?.[1]) {
+      for (const arg of splitTopLevel(generic[1], ',')) visit(arg)
+      return
+    }
+    if (TYPE_TOKEN_RE.test(t)) out.push(t)
+  }
+  visit(declared)
+  return out
+}
+
+/**
+ * `TYPE_UNRESOLVED` — error. Every non-primitive leaf type named by a
+ * method param, a method return, or a model field must resolve to a model
+ * in this space (by id or name — the same nominal matching `DTO_UNUSED`
+ * and the AI export rely on). Without this check a typo'd payload type
+ * (`returns: UserDtoo`) validates 0/0 while every downstream consumer —
+ * implementation briefs, codegen, an LLM implementer — silently loses the
+ * field list behind the name. The nominal counterpart of REF_BROKEN.
+ *
+ * Two deliberate exemptions:
+ *   - Exception names declared in any module's `errorMapping[].exception`
+ *     count as known types — error handlers legitimately take them as
+ *     params, and the errorMapping IS their contract registry.
+ *   - Components and models inside `type: external` modules are skipped
+ *     entirely: they describe a vendor's surface you don't implement, and
+ *     its payload contract is pinned by `wireCapture`, not by models.
+ */
+export function ruleTypeUnresolved(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const known = new Set<string>()
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (t?.kind === 'model') {
+      known.add(t.entity.id)
+      known.add(t.entity.name)
+    }
+  }
+  for (const mod of space.modules) {
+    for (const em of mod.errorMapping ?? []) known.add(em.exception)
+  }
+  const check = (declared: string, where: string, entityRef: string): void => {
+    for (const token of typeLeafTokens(declared)) {
+      if (PRIMITIVE_TYPE_NAMES.has(token.toLowerCase())) continue
+      if (known.has(token)) continue
+      const near = closestMatches(token, known, 2)
+      issues.push({
+        severity: 'error',
+        code: 'TYPE_UNRESOLVED',
+        message: `${where} names type '${token}'${declared === token ? '' : ` (in '${declared}')`}, which is neither a primitive nor a model in this space.`,
+        entityRef,
+        suggestion:
+          near.length > 0
+            ? `Did you mean ${near.map((n) => `'${n}'`).join(' or ')}? Otherwise add the model, or use a primitive type.`
+            : 'Add the model, fix the spelling, or use a primitive type.',
+      })
+    }
+  }
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (!t) continue
+    if (t.kind === 'component') {
+      if (t.module.type === 'external') continue
+      for (const m of t.entity.methods) {
+        check(m.returns, `Method '${t.entity.id}.${m.name}' returns`, ref)
+        for (const p of m.params) {
+          check(p.type, `Method '${t.entity.id}.${m.name}' param '${p.name}'`, ref)
+        }
+      }
+    } else if (t.kind === 'model') {
+      if (t.module.type === 'external') continue
+      for (const f of t.entity.fields) {
+        check(f.type, `Model '${t.entity.id}' field '${f.name}'`, ref)
+      }
+    }
+  }
+  return issues
+}
+
+/** Normalize a step/call endpoint to its owning component ref, else null. */
+function owningComponentRef(ref: string, index: RefIndex): string | null {
+  const t = index.get(ref)
+  if (!t) return null
+  if (t.kind === 'component') return ref
+  if (t.kind === 'method') return ref.slice(0, ref.lastIndexOf('/method:'))
+  return null
+}
+
+interface DeclaredEdge {
+  fromRef: string
+  toRef: string
+  /** `false` for `composes:` containment edges (structural, not calls). */
+  viaCalls: boolean
+  /** Human handle for messages, e.g. `OrderService.create → module:…`. */
+  label: string
+}
+
+/**
+ * Component-granularity edges declared by the wiring: every
+ * `methods[].calls[]` target plus `composes:` containment. Method-level
+ * call targets are normalized to their owning component so steps written
+ * at component level still match.
+ */
+function declaredCallEdges(space: Space, index: RefIndex): Map<string, DeclaredEdge> {
+  const edges = new Map<string, DeclaredEdge>()
+  const add = (edge: DeclaredEdge): void => {
+    const key = `${edge.fromRef} -> ${edge.toRef}`
+    const existing = edges.get(key)
+    // A calls-backed edge outranks a composes-backed duplicate: only
+    // calls edges participate in WIRING_CALL_WITHOUT_STEP.
+    if (!existing || (!existing.viaCalls && edge.viaCalls)) edges.set(key, edge)
+  }
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (!t || t.kind !== 'component') continue
+    for (const m of t.entity.methods) {
+      for (const call of m.calls) {
+        const toRef = owningComponentRef(call.target, index)
+        if (!toRef) continue
+        add({
+          fromRef: ref,
+          toRef,
+          viaCalls: true,
+          label: `${t.entity.id}.${m.name} → ${call.target}`,
+        })
+      }
+    }
+    for (const contained of t.entity.composes ?? []) {
+      const toRef = owningComponentRef(contained, index)
+      if (!toRef) continue
+      add({ fromRef: ref, toRef, viaCalls: false, label: `${t.entity.id} composes ${contained}` })
+    }
+  }
+  return edges
+}
+
+/**
+ * `WIRING_STEP_WITHOUT_CALL` — warning. A use-case step walks an edge the
+ * wiring never declares: for `http` / `internal-call` steps between two
+ * components there must be a `methods[].calls[]` (or `composes:`) edge
+ * from the from-component to the to-component; for `event` steps the
+ * publisher must `emits:` an event model the receiver `subscribes:` to.
+ * Steps and calls are two records of the same edge — when they disagree,
+ * one of them is lying. Module-level endpoints and actors are skipped
+ * (nothing precise to check). `--strict-wiring` escalates to error.
+ */
+export function ruleWiringStepWithoutCall(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const declared = declaredCallEdges(space, index)
+  for (const uc of space.useCases) {
+    for (const { step, scope } of walkAllSteps(uc)) {
+      if (step.protocol === 'http' || step.protocol === 'internal-call') {
+        const fromRef = owningComponentRef(step.from, index)
+        const toRef = owningComponentRef(step.to, index)
+        if (!fromRef || !toRef || fromRef === toRef) continue
+        if (declared.has(`${fromRef} -> ${toRef}`)) continue
+        // Error flows legitimately walk a call edge in reverse: an exception
+        // or early return propagates callee → caller over the same edge
+        // ("UserRepository → UserService: raises ConflictError"). Accept the
+        // reverse edge there. Happy paths stay strict — `http-response` is
+        // the modelled reverse for http, and a forward internal edge must be
+        // a declared call.
+        if (scope !== 'happy' && declared.has(`${toRef} -> ${fromRef}`)) continue
+        issues.push({
+          severity: 'warning',
+          code: 'WIRING_STEP_WITHOUT_CALL',
+          message: `Use case '${uc.id}' step (${scope}) walks '${step.from}' → '${step.to}' (${step.protocol}), but no method on '${fromRef}' declares a call to '${toRef}'.`,
+          entityRef: `usecase:${uc.id}`,
+          suggestion: `Declare the edge: add a 'calls:' entry on the calling method of '${fromRef}' (or 'composes:' for structural containment), or fix the step.`,
+        })
+      } else if (step.protocol === 'event') {
+        const fromRef = owningComponentRef(step.from, index)
+        const toRef = owningComponentRef(step.to, index)
+        if (!fromRef || !toRef) continue
+        const from = index.get(fromRef)
+        const to = index.get(toRef)
+        if (from?.kind !== 'component' || to?.kind !== 'component') continue
+        const emitted = new Set(from.entity.emits.map((e) => e.event))
+        const connected = to.entity.subscribes.some((s) => emitted.has(s.event))
+        if (connected) continue
+        issues.push({
+          severity: 'warning',
+          code: 'WIRING_STEP_WITHOUT_CALL',
+          message: `Use case '${uc.id}' step (${scope}) claims '${fromRef}' publishes an event consumed by '${toRef}', but no emits/subscribes pair on the same event model connects them.`,
+          entityRef: `usecase:${uc.id}`,
+          suggestion: `Declare 'emits:' on the publisher and 'subscribes:' on the receiver pointing at the same event model, or fix the step.`,
+        })
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * `WIRING_CALL_WITHOUT_STEP` — info. A declared call edge is never walked
+ * by any use-case step (happy path or error flow, any protocol). Either a
+ * scenario is missing or the call is dead wiring. `composes:` edges are
+ * exempt — structural containment isn't a scenario edge.
+ */
+export function ruleWiringCallWithoutStep(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const walked = new Set<string>()
+  for (const uc of space.useCases) {
+    for (const { step } of walkAllSteps(uc)) {
+      const fromRef = owningComponentRef(step.from, index)
+      const toRef = owningComponentRef(step.to, index)
+      if (fromRef && toRef) walked.add(`${fromRef} -> ${toRef}`)
+    }
+  }
+  for (const [key, edge] of declaredCallEdges(space, index)) {
+    if (!edge.viaCalls) continue
+    if (walked.has(key)) continue
+    issues.push({
+      severity: 'info',
+      code: 'WIRING_CALL_WITHOUT_STEP',
+      message: `Call edge '${edge.label}' is declared in the wiring but never walked by any use-case step. Either a scenario is missing or the call is dead.`,
+      entityRef: edge.fromRef,
+    })
+  }
+  return issues
+}
+
+/**
+ * `STEP_VIA_MISSING` — info. An `http` / `event` step into a concrete
+ * component carries no payload model (`via:`). Without a via the edge has
+ * no wire contract — briefs and implementers can't know what crosses it.
+ * Response-only edges (GET flows) may point `via` at the response model
+ * (the via-mismatch rule accepts a returns match); truly payload-less
+ * edges can suppress this code on the use case. `--strict-wiring`
+ * escalates to error.
+ */
+export function ruleStepViaMissing(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  for (const uc of space.useCases) {
+    for (const { step, scope } of walkAllSteps(uc)) {
+      if (step.protocol !== 'http' && step.protocol !== 'event') continue
+      if (step.via) continue
+      if (!owningComponentRef(step.to, index)) continue
+      issues.push({
+        severity: 'info',
+        code: 'STEP_VIA_MISSING',
+        message: `Use case '${uc.id}' step (${scope}) '${step.from}' → '${step.to}' (${step.protocol}) carries no payload model.`,
+        entityRef: `usecase:${uc.id}`,
+        suggestion: `Set 'via:' to the request DTO / event model (or the response model for response-only edges) so the edge has an explicit contract.`,
+      })
+    }
+  }
+  return issues
+}
+
+// ---------- 3.18 Error mapping closure (v0.6 — W5) ----------
+
+/**
+ * `THROWS_UNMAPPED` — warning. A method that serves an HTTP route
+ * (`httpMethod` declared) throws an exception with no row in its module's
+ * `errorMapping`. Without the row the wire-level outcome of the failure is
+ * undeclared — an implementer can't know what status/code the client sees,
+ * and use-case `errorFlows` have nothing concrete to bind to.
+ *
+ * Scope decisions:
+ *   - Only http-reachable methods are checked. Internal methods rethrow
+ *     into their callers; the mapping matters where the exception meets
+ *     the wire, and demanding a row per internal throw would force every
+ *     module to duplicate its callee's registry.
+ *   - `client` / `page` / `widget` components are exempt: on the caller
+ *     side, `httpMethod`/`httpPath` document the *outgoing* request (the
+ *     canonical apiClient idiom), so their throws never serve a route.
+ *   - `type: external` modules are exempt (vendor surface — wireCapture
+ *     pins that contract, and you don't implement their handlers).
+ *   - Matching is verbatim by exception name — the same nominal matching
+ *     TYPE_UNRESOLVED applies to types.
+ *
+ * `--strict-contracts` escalates to error: it's a contract-layer gap, same
+ * family as the CONTRACT_CALL_* credential checks.
+ */
+const HTTP_CALLER_SIDE_TYPES: ReadonlySet<string> = new Set(['client', 'page', 'widget'])
+
+export function ruleThrowsUnmapped(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (!t || t.kind !== 'component') continue
+    if (t.module.type === 'external') continue
+    if (HTTP_CALLER_SIDE_TYPES.has(t.entity.type)) continue
+    const mapped = new Set((t.module.errorMapping ?? []).map((em) => em.exception))
+    for (const m of t.entity.methods) {
+      if (!m.httpMethod) continue
+      for (const exc of m.throws) {
+        if (mapped.has(exc)) continue
+        const where = m.httpPath ? `${m.httpMethod} ${m.httpPath}` : m.httpMethod
+        issues.push({
+          severity: 'warning',
+          code: 'THROWS_UNMAPPED',
+          message: `Method '${t.entity.id}.${m.name}' (${where}) throws '${exc}', but module '${t.module.id}' has no errorMapping row for it — the wire-level outcome of the failure is undeclared.`,
+          entityRef: ref,
+          suggestion: `Add '- exception: ${exc}' with an httpStatus to module '${t.module.id}' errorMapping, or remove the throw if it cannot escape this method.`,
+        })
+      }
+    }
+  }
+  return issues
+}
+
+// ---------- 3.19 Event delivery contract (v0.6 — W4) ----------
+//
+// Event models may declare `delivery` (at-least-once / at-most-once /
+// exactly-once) and `orderingKey`; subscriptions may declare `idempotency`.
+// Three rules close the contract:
+//
+//   EVENT_IDEMPOTENCY_MISSING  — warning. at-least-once event + subscriber
+//                                without declared idempotency = the classic
+//                                double-processing hole.
+//   EVENT_KEY_FIELD_UNKNOWN    — error. orderingKey / idempotency.key must
+//                                name a real field on the event model.
+//   EVENT_DELIVERY_ON_NON_EVENT — error. delivery/orderingKey on a model
+//                                that isn't modelKind: event.
+
+/** Resolve a ref to its model entity, or null when it isn't a model. */
+function resolveModel(index: RefIndex, ref: string): Model | null {
+  const target = index.get(ref)
+  if (!target || target.kind !== 'model') return null
+  return target.entity
+}
+
+/**
+ * `EVENT_IDEMPOTENCY_MISSING` — warning. The subscribed event promises
+ * `delivery: at-least-once` (redelivery on failure is expected), but the
+ * subscription declares no `idempotency`. The implementer has no contract
+ * for surviving replay — the top source of double-charges and duplicate
+ * side effects in event-driven systems. Events without a declared
+ * `delivery` are skipped: the contract isn't stated, so there's nothing
+ * to hold the consumer to (declare delivery to arm this rule).
+ */
+export function ruleEventIdempotencyMissing(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  for (const { component, componentRef } of iterateAllComponents(space)) {
+    const subs = component.subscribes ?? []
+    for (let i = 0; i < subs.length; i++) {
+      const sub = subs[i]
+      if (!sub || sub.idempotency) continue
+      const event = resolveModel(index, sub.event)
+      if (event?.delivery !== 'at-least-once') continue
+      issues.push({
+        severity: 'warning',
+        code: 'EVENT_IDEMPOTENCY_MISSING',
+        message: `Component '${component.name}' (${componentRef}) subscribes to '${sub.event}' which declares delivery: at-least-once, but the subscription declares no idempotency — redelivery will double-process.`,
+        entityRef: componentRef,
+        suggestion: `Add 'idempotency: { key: <event field>, strategy: dedupe-store | upsert | natural }' to the subscribes entry, or change the event's delivery if the transport really doesn't redeliver.`,
+      })
+    }
+  }
+  return issues
+}
+
+/**
+ * `EVENT_KEY_FIELD_UNKNOWN` — error. A delivery-contract key names a
+ * field that doesn't exist: either the event model's own `orderingKey`,
+ * or a subscription's `idempotency.key` checked against the subscribed
+ * event model. Same class of breakage as TYPE_UNRESOLVED — a phantom
+ * name that every downstream consumer would trust.
+ */
+export function ruleEventKeyFieldUnknown(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const suggest = (model: Model, key: string): string => {
+    const near = closestMatches(key, new Set(model.fields.map((f) => f.name)), 2)
+    return near.length > 0
+      ? `Did you mean ${near.map((n) => `'${n}'`).join(' or ')}? Otherwise add the field to '${model.id}'.`
+      : `Add the field to '${model.id}', or fix the key.`
+  }
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (!t || t.kind !== 'model') continue
+    const model = t.entity
+    if (model.orderingKey === undefined) continue
+    if (model.fields.some((f) => f.name === model.orderingKey)) continue
+    issues.push({
+      severity: 'error',
+      code: 'EVENT_KEY_FIELD_UNKNOWN',
+      message: `Model '${model.id}' (${ref}) declares orderingKey '${model.orderingKey}', but has no field with that name.`,
+      entityRef: ref,
+      suggestion: suggest(model, model.orderingKey),
+    })
+  }
+  for (const { component, componentRef } of iterateAllComponents(space)) {
+    const subs = component.subscribes ?? []
+    for (let i = 0; i < subs.length; i++) {
+      const sub = subs[i]
+      const key = sub?.idempotency?.key
+      if (!sub || key === undefined) continue
+      const event = resolveModel(index, sub.event)
+      if (!event) continue // REF_BROKEN / TARGET_NOT_EVENT cover bad refs
+      if (event.fields.some((f) => f.name === key)) continue
+      issues.push({
+        severity: 'error',
+        code: 'EVENT_KEY_FIELD_UNKNOWN',
+        message: `Component '${component.name}' (${componentRef}) subscribes[${i}] declares idempotency.key '${key}', but event model '${sub.event}' has no field with that name.`,
+        entityRef: componentRef,
+        suggestion: suggest(event, key),
+      })
+    }
+  }
+  return issues
+}
+
+/**
+ * `EVENT_DELIVERY_ON_NON_EVENT` — error. `delivery` / `orderingKey` are
+ * transport-contract fields; on a dto/entity/value-object/enum they are
+ * dead weight that a reader would trust. (Unlike the legacy `topic`
+ * field, which predates this rule and stays silently ignored, the W4
+ * fields are validated from birth.)
+ */
+export function ruleEventDeliveryOnNonEvent(space: Space, index: RefIndex): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  for (const ref of index.refs()) {
+    const t = index.get(ref)
+    if (!t || t.kind !== 'model') continue
+    const model = t.entity
+    if (model.modelKind === 'event') continue
+    const set: string[] = []
+    if (model.delivery !== undefined) set.push('delivery')
+    if (model.orderingKey !== undefined) set.push('orderingKey')
+    if (set.length === 0) continue
+    issues.push({
+      severity: 'error',
+      code: 'EVENT_DELIVERY_ON_NON_EVENT',
+      message: `Model '${model.id}' (${ref}) declares ${set.join(' and ')} but has modelKind='${model.modelKind}' — delivery contracts only apply to event models.`,
+      entityRef: ref,
+      suggestion: `Change modelKind to 'event' (with a topic:), or remove ${set.join(' / ')}.`,
     })
   }
   return issues

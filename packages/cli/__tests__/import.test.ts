@@ -234,6 +234,78 @@ describe('pd import --from-jsonl', () => {
     expect(fs.existsSync(path.join(tmp, 'spaces/demo/modules/api/models/OK.yaml'))).toBe(false)
   })
 
+  it('rename guard: skips a new entity whose sourceRef file an existing id already cites', async () => {
+    const existing = path.join(tmp, 'spaces/demo/modules/api/models/OrderDto.yaml')
+    fs.mkdirSync(path.dirname(existing), { recursive: true })
+    fs.writeFileSync(
+      existing,
+      'kind: model\nid: OrderDto\nname: OrderDto\nmodelKind: dto\nsourceRef: src/models/order.ts:5\nfields: []\n',
+    )
+    const file = writeJsonl([
+      {
+        _placement: { spaceId: 'demo', module: 'api' },
+        kind: 'model',
+        id: 'OrderResponse',
+        name: 'OrderResponse',
+        modelKind: 'dto',
+        sourceRef: 'src/models/order.ts:44',
+        fields: [],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdImport(parseArgs(['--from-jsonl', file]))
+    spy.mockRestore()
+    expect(code).toBe(0)
+    // The fork is refused; the hint names the old id.
+    expect(fs.existsSync(path.join(tmp, 'spaces/demo/modules/api/models/OrderResponse.yaml'))).toBe(
+      false,
+    )
+    const out = logs.join('\n')
+    expect(out).toContain('rename?')
+    expect(out).toContain('OrderDto')
+  })
+
+  it('rename guard: writes normally when the old id is part of the same import', async () => {
+    const existing = path.join(tmp, 'spaces/demo/modules/api/models/OrderDto.yaml')
+    fs.mkdirSync(path.dirname(existing), { recursive: true })
+    fs.writeFileSync(
+      existing,
+      'kind: model\nid: OrderDto\nname: OrderDto\nmodelKind: dto\nsourceRef: src/models/order.ts:5\nfields: []\n',
+    )
+    const file = writeJsonl([
+      {
+        _placement: { spaceId: 'demo', module: 'api' },
+        kind: 'model',
+        id: 'OrderDto',
+        name: 'OrderDto',
+        modelKind: 'dto',
+        sourceRef: 'src/models/order.ts:5',
+        fields: [],
+      },
+      {
+        // A genuinely NEW model in the same source file — not a rename,
+        // because OrderDto is still alive in the incoming extract.
+        _placement: { spaceId: 'demo', module: 'api' },
+        kind: 'model',
+        id: 'OrderItemDto',
+        name: 'OrderItemDto',
+        modelKind: 'dto',
+        sourceRef: 'src/models/order.ts:60',
+        fields: [],
+      },
+    ])
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const code = await cmdImport(parseArgs(['--from-jsonl', file]))
+    spy.mockRestore()
+    expect(code).toBe(0)
+    expect(fs.existsSync(path.join(tmp, 'spaces/demo/modules/api/models/OrderItemDto.yaml'))).toBe(
+      true,
+    )
+  })
+
   it('dry-run prints a plan without writing', async () => {
     const file = writeJsonl([
       {

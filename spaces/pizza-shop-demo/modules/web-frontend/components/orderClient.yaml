@@ -2,16 +2,30 @@ kind: component
 id: orderClient
 name: orderClient
 type: client
-description: HTTP client for /api/orders; authenticated via session cookie.
+description: HTTP client for /api/orders; attaches the session token as a bearer Authorization header.
 methods:
   - name: create
     params:
       - name: request
         type: CreateOrderRequest
     returns: OrderResponse
+    calls:
+      - target: module:api-server/domain:orders/component:OrderController/method:create
+        method: POST
+        path: /api/orders
+        credential:
+          type: user-jwt
+          header: Authorization
     httpMethod: POST
     httpPath: /api/orders
   - name: listMine
     returns: List<Order>
+    calls:
+      - target: module:api-server/domain:orders/component:OrderController/method:listMine
+        method: GET
+        path: /api/orders
+        credential:
+          type: user-jwt
+          header: Authorization
     httpMethod: GET
     httpPath: /api/orders

@@ -337,6 +337,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Plain validate. Layer strict flags as your spec matures.
       - run: pnpm pd validate
+      # Deterministic spec↔code anchor check — no LLM, so it belongs in
+      # default CI (a design-first space with no sourceRefs passes trivially).
+      - run: pnpm pd anchors
       # Recommended once your spec uses the matching features:
       # - run: pnpm pd validate --strict-contracts --check-orphan-paths --check-state-coverage --check-runbook-coverage --strict-wire-capture
       # - run: pnpm pd drift --from-jsonl extract.jsonl --fail-on-error

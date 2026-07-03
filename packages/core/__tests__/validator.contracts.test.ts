@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildRefIndex, validateSemanticPass } from '../src/index.js'
 import type { Space } from '../src/index.js'
-import { CallSpecSchema, ComponentSchema } from '../src/schema.js'
+import { CallSpecSchema, ComponentSchema, SpaceSchema } from '../src/schema.js'
+import { ruleThrowsUnmapped } from '../src/validator/semantic.js'
 
 describe('A1 — calls/routes schema parsing', () => {
   it('legacy ref-string calls normalize to {target, optional:false}', () => {
@@ -299,5 +300,109 @@ describe('A1 — contract rules', () => {
     const issues = validateSemanticPass(space, index)
     const contractIssues = issues.filter((i) => i.code.startsWith('CONTRACT_CALL_'))
     expect(contractIssues).toEqual([])
+  })
+})
+
+// ---------- 3.18 Error mapping closure (v0.6 — W5) ----------
+
+function throwsSpace(args: {
+  throws?: string[]
+  httpMethod?: 'GET' | 'POST'
+  errorMapping?: Array<{ exception: string; httpStatus: number }>
+  moduleType?: 'service' | 'external'
+}): Space {
+  return SpaceSchema.parse({
+    meta: { id: 'w5', name: 'W5', version: '0.1.0', pizzaDocVersion: '0.6.0' },
+    modules: [
+      {
+        kind: 'module',
+        id: 'api',
+        name: 'API',
+        type: args.moduleType ?? 'service',
+        errorMapping: args.errorMapping ?? [],
+        components: [
+          {
+            kind: 'component',
+            id: 'OrderController',
+            name: 'OrderController',
+            type: 'controller',
+            methods: [
+              {
+                name: 'create',
+                ...(args.httpMethod ? { httpMethod: args.httpMethod, httpPath: '/orders' } : {}),
+                throws: args.throws ?? [],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
+
+describe('ruleThrowsUnmapped (THROWS_UNMAPPED — v0.6 W5)', () => {
+  it('flags an http-reachable throw with no errorMapping row', () => {
+    const space = throwsSpace({ httpMethod: 'POST', throws: ['ConflictError'] })
+    const issues = ruleThrowsUnmapped(space, buildRefIndex(space))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.code).toBe('THROWS_UNMAPPED')
+    expect(issues[0]?.severity).toBe('warning')
+    expect(issues[0]?.message).toContain("'ConflictError'")
+    expect(issues[0]?.message).toContain('POST /orders')
+    expect(issues[0]?.suggestion).toContain('exception: ConflictError')
+  })
+
+  it('stays quiet when the module maps the exception', () => {
+    const space = throwsSpace({
+      httpMethod: 'POST',
+      throws: ['ConflictError'],
+      errorMapping: [{ exception: 'ConflictError', httpStatus: 409 }],
+    })
+    expect(ruleThrowsUnmapped(space, buildRefIndex(space))).toHaveLength(0)
+  })
+
+  it('skips non-http methods — the mapping matters where the exception meets the wire', () => {
+    const space = throwsSpace({ throws: ['ConflictError'] })
+    expect(ruleThrowsUnmapped(space, buildRefIndex(space))).toHaveLength(0)
+  })
+
+  it('skips type: external modules (vendor surface)', () => {
+    const space = throwsSpace({
+      httpMethod: 'POST',
+      throws: ['VendorError'],
+      moduleType: 'external',
+    })
+    expect(ruleThrowsUnmapped(space, buildRefIndex(space))).toHaveLength(0)
+  })
+
+  it('skips client components — their httpMethod documents the outgoing request', () => {
+    const space = SpaceSchema.parse({
+      meta: { id: 'w5c', name: 'W5C', version: '0.1.0', pizzaDocVersion: '0.6.0' },
+      modules: [
+        {
+          kind: 'module',
+          id: 'web',
+          name: 'Web',
+          type: 'frontend',
+          components: [
+            {
+              kind: 'component',
+              id: 'apiClient',
+              name: 'apiClient',
+              type: 'client',
+              methods: [
+                {
+                  name: 'create',
+                  httpMethod: 'POST',
+                  httpPath: '/orders',
+                  throws: ['NetworkError'],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    expect(ruleThrowsUnmapped(space, buildRefIndex(space))).toHaveLength(0)
   })
 })

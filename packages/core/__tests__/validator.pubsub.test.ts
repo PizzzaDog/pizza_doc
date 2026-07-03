@@ -12,7 +12,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildRefIndex, validateRefsPass, validateSemanticPass } from '../src/index.js'
-import { ComponentSchema } from '../src/schema.js'
+import { ComponentSchema, SpaceSchema } from '../src/schema.js'
+import {
+  ruleEventDeliveryOnNonEvent,
+  ruleEventIdempotencyMissing,
+  ruleEventKeyFieldUnknown,
+} from '../src/validator/semantic.js'
 
 // We use validateRefsPass directly (it builds its own index internally).
 // buildRefIndex stays imported for semantic-pass cases.
@@ -253,5 +258,138 @@ describe('B2 — COMPONENT_UNUSED escape via pub/sub', () => {
       .filter((i) => i.code === 'COMPONENT_UNUSED')
       .find((i) => i.entityRef === 'module:api/component:OrphanSub')
     expect(unused).toBeDefined()
+  })
+})
+
+// ---------- 3.19 Event delivery contract (v0.6 — W4) ----------
+
+function deliverySpace(args: {
+  delivery?: 'at-least-once' | 'at-most-once' | 'exactly-once'
+  orderingKey?: string
+  modelKind?: string
+  idempotency?: { key: string; strategy?: string }
+}): Space {
+  return SpaceSchema.parse({
+    meta: { id: 'w4', name: 'W4', version: '0.1.0', pizzaDocVersion: '0.6.0' },
+    modules: [
+      {
+        kind: 'module',
+        id: 'api',
+        name: 'API',
+        type: 'service',
+        models: [
+          {
+            kind: 'model',
+            id: 'OrderPlaced',
+            name: 'OrderPlaced',
+            modelKind: args.modelKind ?? 'event',
+            topic: 'orders.placed',
+            fields: [
+              { name: 'orderId', type: 'uuid' },
+              { name: 'total', type: 'int' },
+            ],
+            ...(args.delivery ? { delivery: args.delivery } : {}),
+            ...(args.orderingKey ? { orderingKey: args.orderingKey } : {}),
+          },
+        ],
+        components: [
+          {
+            kind: 'component',
+            id: 'Pub',
+            name: 'Pub',
+            type: 'service',
+            emits: [{ event: 'module:api/model:OrderPlaced' }],
+          },
+          {
+            kind: 'component',
+            id: 'Sub',
+            name: 'Sub',
+            type: 'consumer',
+            subscribes: [
+              {
+                event: 'module:api/model:OrderPlaced',
+                ...(args.idempotency ? { idempotency: args.idempotency } : {}),
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
+
+describe('ruleEventIdempotencyMissing (EVENT_IDEMPOTENCY_MISSING — v0.6 W4)', () => {
+  it('flags an at-least-once subscription without declared idempotency', () => {
+    const space = deliverySpace({ delivery: 'at-least-once' })
+    const issues = ruleEventIdempotencyMissing(space, buildRefIndex(space))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.code).toBe('EVENT_IDEMPOTENCY_MISSING')
+    expect(issues[0]?.severity).toBe('warning')
+    expect(issues[0]?.entityRef).toBe('module:api/component:Sub')
+  })
+
+  it('stays quiet when idempotency is declared', () => {
+    const space = deliverySpace({
+      delivery: 'at-least-once',
+      idempotency: { key: 'orderId', strategy: 'dedupe-store' },
+    })
+    expect(ruleEventIdempotencyMissing(space, buildRefIndex(space))).toHaveLength(0)
+  })
+
+  it('only arms on at-least-once — other guarantees and undeclared delivery are skipped', () => {
+    for (const delivery of ['at-most-once', 'exactly-once', undefined] as const) {
+      const space = deliverySpace(delivery ? { delivery } : {})
+      expect(ruleEventIdempotencyMissing(space, buildRefIndex(space))).toHaveLength(0)
+    }
+  })
+})
+
+describe('ruleEventKeyFieldUnknown (EVENT_KEY_FIELD_UNKNOWN — v0.6 W4)', () => {
+  it('flags an orderingKey that names no field, with a near-match suggestion', () => {
+    const space = deliverySpace({ delivery: 'at-least-once', orderingKey: 'orderd' })
+    const issues = ruleEventKeyFieldUnknown(space, buildRefIndex(space))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.severity).toBe('error')
+    expect(issues[0]?.message).toContain("'orderd'")
+    expect(issues[0]?.suggestion).toContain("'orderId'")
+  })
+
+  it('flags an idempotency.key that names no field on the event model', () => {
+    const space = deliverySpace({
+      delivery: 'at-least-once',
+      idempotency: { key: 'orderUuid' },
+    })
+    const issues = ruleEventKeyFieldUnknown(space, buildRefIndex(space))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.message).toContain("'orderUuid'")
+    expect(issues[0]?.entityRef).toBe('module:api/component:Sub')
+  })
+
+  it('accepts keys that name real fields', () => {
+    const space = deliverySpace({
+      delivery: 'at-least-once',
+      orderingKey: 'orderId',
+      idempotency: { key: 'orderId', strategy: 'upsert' },
+    })
+    expect(ruleEventKeyFieldUnknown(space, buildRefIndex(space))).toHaveLength(0)
+  })
+})
+
+describe('ruleEventDeliveryOnNonEvent (EVENT_DELIVERY_ON_NON_EVENT — v0.6 W4)', () => {
+  it('flags delivery/orderingKey on a non-event model', () => {
+    const space = deliverySpace({
+      modelKind: 'dto',
+      delivery: 'at-least-once',
+      orderingKey: 'orderId',
+    })
+    const issues = ruleEventDeliveryOnNonEvent(space, buildRefIndex(space))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.severity).toBe('error')
+    expect(issues[0]?.message).toContain('delivery and orderingKey')
+  })
+
+  it('accepts delivery contracts on event models', () => {
+    const space = deliverySpace({ delivery: 'exactly-once', orderingKey: 'orderId' })
+    expect(ruleEventDeliveryOnNonEvent(space, buildRefIndex(space))).toHaveLength(0)
   })
 })

@@ -13,7 +13,7 @@ columns:
       column: id
   - name: status
     sqlType: varchar(32)
-    description: "TODO: enumerate allowed values (pending/paid/failed/cancelled) — DB enum or free varchar with app-side whitelist?"
+    description: "Allowed values are the Order state machine's states: paid/preparing/delivered/cancelled (free varchar; the app-side whitelist is the SM on the Order entity). Rows are only ever inserted as 'paid'."
   - name: total_cents
     sqlType: int
   - name: stripe_charge_id

@@ -3,6 +3,21 @@ id: PaymentGateway
 name: PaymentGateway
 type: infrastructure
 description: Thin wrapper around StripeAPI; translates our PaymentRequest into Stripe's schema and back.
+decidedBy:
+  - ADR-001
+wireCapture:
+  source: curl-live
+  path: wire-captures/stripe/create-charge.txt
+  capturedAt: "2026-07-03"
+  capturedAgainst: stripe-api@2024-06-20
+  scenarios:
+    - name: success
+      description: 200 with status=succeeded; chargeId is persisted to orders.stripe_charge_id.
+    - name: declined
+      description: 402 card_error/card_declined; surfaces as StripeDeclinedException → 402 STRIPE_DECLINED.
+      assertions:
+        httpStatus: 402
+        errorType: card_error
 methods:
   - name: charge
     params:

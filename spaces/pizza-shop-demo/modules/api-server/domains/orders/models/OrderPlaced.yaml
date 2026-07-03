@@ -1,0 +1,17 @@
+kind: model
+id: OrderPlaced
+name: OrderPlaced
+modelKind: event
+topic: orders.placed
+delivery: at-least-once
+orderingKey: orderId
+description: Published by OrderService after the order row is committed. The broker redelivers on consumer failure, so every subscriber must dedupe by orderId.
+fields:
+  - name: orderId
+    type: uuid
+  - name: userId
+    type: uuid
+  - name: totalCents
+    type: int
+  - name: placedAt
+    type: timestamp

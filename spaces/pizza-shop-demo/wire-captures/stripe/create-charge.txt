@@ -1,0 +1,32 @@
+# Captured with: curl -sv https://api.stripe.com/v1/charges (test mode), 2026-07-03
+# Scenario 1: success
+> POST /v1/charges HTTP/2
+> Host: api.stripe.com
+> Authorization: Bearer sk_test_***
+> Content-Type: application/x-www-form-urlencoded
+>
+> amount=2980&currency=eur&source=tok_visa&description=order+7f3e...
+
+< HTTP/2 200
+< Content-Type: application/json
+{
+  "id": "ch_3PqXk92eZvKYlo2C1gG8rT4w",
+  "object": "charge",
+  "amount": 2980,
+  "currency": "eur",
+  "paid": true,
+  "status": "succeeded"
+}
+
+# Scenario 2: declined card (tok_chargeDeclined)
+< HTTP/2 402
+< Content-Type: application/json
+{
+  "error": {
+    "type": "card_error",
+    "code": "card_declined",
+    "decline_code": "generic_decline",
+    "message": "Your card was declined.",
+    "charge": "ch_3PqXlA2eZvKYlo2C0Xw9uL5b"
+  }
+}

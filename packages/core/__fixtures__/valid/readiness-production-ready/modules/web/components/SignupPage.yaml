@@ -2,3 +2,10 @@ kind: component
 id: SignupPage
 name: SignupPage
 type: page
+methods:
+  - name: submit
+    params:
+      - name: form
+        type: CreateUserRequest
+    calls:
+      - module:api/component:AuthController/method:create

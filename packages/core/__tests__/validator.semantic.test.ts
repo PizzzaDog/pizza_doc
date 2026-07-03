@@ -86,6 +86,18 @@ const FIXTURELESS_RULES = [
   'WIRE_CAPTURE_MISSING',
   // 3.16 — B4 table migration parity. Covered by validator.migration.test.ts.
   'MIGRATION_COLUMN_INCONSISTENT',
+  // 3.17 — W1 type closure + wiring parity. Covered by
+  // validator.wiring.test.ts with in-memory Space fixtures.
+  'TYPE_UNRESOLVED',
+  'WIRING_STEP_WITHOUT_CALL',
+  'WIRING_CALL_WITHOUT_STEP',
+  'STEP_VIA_MISSING',
+  // 3.18 — W5 error mapping closure. Covered by validator.contracts.test.ts.
+  'THROWS_UNMAPPED',
+  // 3.19 — W4 event delivery contract. Covered by validator.pubsub.test.ts.
+  'EVENT_IDEMPOTENCY_MISSING',
+  'EVENT_KEY_FIELD_UNKNOWN',
+  'EVENT_DELIVERY_ON_NON_EVENT',
 ] as const
 
 describe('Pass 3 semantic validation', () => {

@@ -229,9 +229,13 @@ NestJS `@UseGuards(…)`, Express middleware chain mentioning role
 checks, Next.js middleware matcher patterns. Ask the orchestrator to
 fill `requires:` on the relevant use-case yamls.
 
-### `sourceRef`
+### `sourceRef` (required)
 
-Every entity: `apps/api/src/…/Foo.ts:12`. Relative to the codebase root.
+Every component / model / table: `apps/api/src/…/Foo.ts:12`, relative to
+the codebase root. Contract, not courtesy: `pd drift` pairs renamed
+symbols by this file path (so a rename reports as RENAME, not
+add+delete) and `pd anchors` resolves it in CI. Omitting it opts the
+entity out of both.
 
 ### `Model.topic` (event-kind)
 

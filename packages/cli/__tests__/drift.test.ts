@@ -116,4 +116,137 @@ describe('pd drift --from-jsonl', () => {
     expect(code).toBe(1)
     expect(logs.join('\n')).toContain('phoneNumber')
   })
+
+  // ---------- rename pairing (v0.6 — code-anchoring Phase 3) ----------
+
+  /** Space-side model citing a source file; the JSONL will rename it. */
+  function writeSpaceOrderDto(fields = '  - name: id\n    type: uuid\n'): void {
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'api', 'models', 'OrderDto.yaml'),
+      `kind: model\nid: OrderDto\nname: OrderDto\nmodelKind: dto\nsourceRef: src/models/order.ts:5\nfields:\n${fields}`,
+    )
+  }
+
+  const matchingUser = {
+    kind: 'model',
+    id: 'User',
+    name: 'User',
+    fields: [
+      { name: 'id', type: 'uuid' },
+      { name: 'email', type: 'string' },
+    ],
+  }
+
+  it('pairs a renamed model by sourceRef file instead of forking the report', async () => {
+    writeSpaceOrderDto()
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'model',
+        id: 'OrderResponse',
+        name: 'OrderResponse',
+        sourceRef: 'src/models/order.ts:41', // line moved — must not matter
+        fields: [{ name: 'id', type: 'uuid' }],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    const out = logs.join('\n')
+    expect(code).toBe(1)
+    expect(out).toContain('OrderDto → OrderResponse')
+    // The pair must be claimed out of both CRITICAL blocks.
+    expect(out).not.toContain('space missing')
+    expect(out).not.toContain('code missing')
+  })
+
+  it('computes field drift across the rename pair', async () => {
+    writeSpaceOrderDto('  - name: id\n    type: uuid\n  - name: total\n    type: int\n')
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'model',
+        id: 'OrderResponse',
+        name: 'OrderResponse',
+        sourceRef: 'src/models/order.ts',
+        fields: [
+          { name: 'id', type: 'uuid' },
+          { name: 'total', type: 'int' },
+          { name: 'currency', type: 'string' }, // added while renaming
+        ],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    expect(code).toBe(1)
+    expect(logs.join('\n')).toContain('currency')
+  })
+
+  it('does not guess when several unmatched entities cite the same file', async () => {
+    writeSpaceOrderDto()
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'api', 'models', 'OrderItemDto.yaml'),
+      'kind: model\nid: OrderItemDto\nname: OrderItemDto\nmodelKind: dto\nsourceRef: src/models/order.ts:30\nfields:\n  - name: id\n    type: uuid\n',
+    )
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'model',
+        id: 'OrderResponse',
+        name: 'OrderResponse',
+        sourceRef: 'src/models/order.ts:41',
+        fields: [{ name: 'id', type: 'uuid' }],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    const out = logs.join('\n')
+    expect(code).toBe(1)
+    // Ambiguous — falls back to the plain codeOnly/spaceOnly report.
+    expect(out).not.toContain('→')
+    expect(out).toContain('OrderResponse')
+    expect(out).toContain('OrderDto')
+  })
+
+  it('--json emits the structured diff with the rename pair', async () => {
+    writeSpaceOrderDto()
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'model',
+        id: 'OrderResponse',
+        name: 'OrderResponse',
+        sourceRef: 'src/models/order.ts:41',
+        fields: [{ name: 'id', type: 'uuid' }],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir, '--json']))
+    spy.mockRestore()
+    expect(code).toBe(1)
+    const report = JSON.parse(logs.join('\n')) as {
+      verdict: string
+      models: { codeOnly: string[]; spaceOnly: string[]; renamed: Array<Record<string, string>> }
+    }
+    expect(report.verdict).toBe('significant')
+    expect(report.models.renamed).toEqual([
+      { from: 'OrderDto', to: 'OrderResponse', file: 'src/models/order.ts' },
+    ])
+    expect(report.models.codeOnly).toEqual([])
+    expect(report.models.spaceOnly).toEqual([])
+  })
 })

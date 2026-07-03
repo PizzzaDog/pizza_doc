@@ -4,3 +4,33 @@ name: API Server
 type: service
 techStack: Spring Boot 3 + Java 21
 description: Backend service that owns authentication, menu, and order processing; persists to postgres-db.
+errorMapping:
+  - exception: UnauthorizedException
+    httpStatus: 403
+    code: UNAUTHORIZED
+    description: Session token valid but the user lacks the admin role.
+  - exception: ValidationException
+    httpStatus: 400
+    code: VALIDATION
+    description: Request body failed field validation; response names the field.
+  - exception: PizzaNotFoundException
+    httpStatus: 404
+    code: PIZZA_NOT_FOUND
+  - exception: OutOfStockException
+    httpStatus: 409
+    code: OUT_OF_STOCK
+    description: At least one requested pizza is unavailable; response lists the pizzaIds.
+  - exception: StripeDeclinedException
+    httpStatus: 402
+    code: STRIPE_DECLINED
+    description: Stripe declined the charge; the reason is passed through verbatim.
+  - exception: EmailAlreadyExistsException
+    httpStatus: 409
+    code: EMAIL_EXISTS
+  - exception: WeakPasswordException
+    httpStatus: 400
+    code: WEAK_PASSWORD
+  - exception: InvalidCredentialsException
+    httpStatus: 401
+    code: INVALID_CREDENTIALS
+    description: Unknown email or wrong password — deliberately the same code for both.

@@ -101,6 +101,27 @@ export type ValidationCode =
   | 'WIRE_CAPTURE_STALE'
   // 3.16 table migration parity (v0.5 — B4)
   | 'MIGRATION_COLUMN_INCONSISTENT'
+  // 3.17 type closure + wiring parity (v0.6 — W1)
+  // TYPE_UNRESOLVED is an error: a phantom type name is the same class of
+  // breakage as REF_BROKEN, just nominal (by name) instead of by ref URI.
+  // The parity codes default to warning/info; `--strict-wiring` escalates
+  // STEP_VIA_MISSING and WIRING_STEP_WITHOUT_CALL to error.
+  | 'TYPE_UNRESOLVED'
+  | 'WIRING_STEP_WITHOUT_CALL'
+  | 'WIRING_CALL_WITHOUT_STEP'
+  | 'STEP_VIA_MISSING'
+  // 3.18 error mapping closure (v0.6 — W5)
+  // A `throws` on an http-reachable method with no errorMapping row has no
+  // declared wire-level outcome. Warning; `--strict-contracts` escalates.
+  | 'THROWS_UNMAPPED'
+  // 3.19 event delivery contract (v0.6 — W4)
+  // EVENT_KEY_FIELD_UNKNOWN and EVENT_DELIVERY_ON_NON_EVENT are errors
+  // (broken contract declaration); EVENT_IDEMPOTENCY_MISSING defaults to
+  // warning — at-least-once delivery without declared consumer idempotency
+  // is the classic double-processing hole.
+  | 'EVENT_IDEMPOTENCY_MISSING'
+  | 'EVENT_KEY_FIELD_UNKNOWN'
+  | 'EVENT_DELIVERY_ON_NON_EVENT'
 
 export interface ValidationIssue {
   severity: Severity

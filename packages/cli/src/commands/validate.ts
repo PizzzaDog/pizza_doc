@@ -11,7 +11,7 @@ import { expectedSpaceId, resolveSpaceDir } from '../util/space-path.js'
 /**
  * `pd validate [spaces/<id>] [--strict-contracts] [--check-orphan-paths]
  *              [--check-state-coverage] [--check-runbook-coverage]
- *              [--strict-wire-capture]`
+ *              [--strict-wire-capture] [--strict-wiring]`
  *
  * Runs the three-pass validator and prints a human-readable summary.
  *
@@ -21,7 +21,10 @@ import { expectedSpaceId, resolveSpaceDir } from '../util/space-path.js'
  *
  *   --strict-contracts       — CONTRACT_CALL_* and EXTERNAL_DEP_USES_UNKNOWN_CONFIG
  *                              warnings become errors. CI gate for
- *                              caller/callee credential parity.
+ *                              caller/callee credential parity. Since v0.6
+ *                              (W5) also escalates THROWS_UNMAPPED — every
+ *                              throw on an http-reachable method must have
+ *                              an errorMapping row.
  *   --check-orphan-paths     — CONTRACT_CALL_PATH_ORPHAN escalates to error.
  *                              CI gate for caller path ↔ callee route parity.
  *   --check-state-coverage   — STATE_MACHINE_SCENARIO_COVERAGE info → error.
@@ -37,6 +40,12 @@ import { expectedSpaceId, resolveSpaceDir } from '../util/space-path.js'
  *                              integrate with vendor APIs; protects against
  *                              the synth-fixture-lies-about-shape failure
  *                              mode (cost a real deployment 5 hours of prod debugging).
+ *   --strict-wiring          — WIRING_STEP_WITHOUT_CALL and STEP_VIA_MISSING
+ *                              escalate to error. v0.6 (W1) gate: use-case
+ *                              steps must match declared calls/emits edges
+ *                              and http/event edges must carry a payload
+ *                              model. TYPE_UNRESOLVED needs no flag — a
+ *                              phantom type is always an error.
  *
  * Exit codes:
  *   0 — no errors and no warnings
@@ -60,8 +69,13 @@ export async function cmdValidate(args: ParsedArgs): Promise<number> {
   const flagStateCoverage = args.flags['check-state-coverage'] === true
   const flagRunbookCoverage = args.flags['check-runbook-coverage'] === true
   const flagStrictWireCapture = args.flags['strict-wire-capture'] === true
+  const flagStrictWiring = args.flags['strict-wiring'] === true
   if (
-    (flagStrictContracts || flagOrphanPaths || flagStateCoverage || flagRunbookCoverage) &&
+    (flagStrictContracts ||
+      flagOrphanPaths ||
+      flagStateCoverage ||
+      flagRunbookCoverage ||
+      flagStrictWiring) &&
     result.space
   ) {
     escalateContractIssues(validation.issues, result.space, {
@@ -69,6 +83,7 @@ export async function cmdValidate(args: ParsedArgs): Promise<number> {
       orphanPaths: flagOrphanPaths,
       stateCoverage: flagStateCoverage,
       runbookCoverage: flagRunbookCoverage,
+      strictWiring: flagStrictWiring,
     })
   }
 
@@ -115,6 +130,18 @@ export async function cmdValidate(args: ParsedArgs): Promise<number> {
     for (const i of infos) printIssue(i)
   }
 
+  // v0.6 (code-anchoring Phase 4) — honest scope note. A clean run proves
+  // the spec is *internally* consistent; nothing here ever read the code.
+  // Without this line 0/0 reads as "done" — see docs/backlog.md
+  // ("Spec ↔ code binding").
+  if (errors.length === 0 && args.flags.quiet !== true) {
+    console.log(
+      dim(
+        '\n  note: spec↔code parity NOT checked — run `pd anchors` (deterministic) or `pd drift --from-jsonl` (needs a code extract).',
+      ),
+    )
+  }
+
   if (errors.length > 0) return 1
   if (strict && warnings.length > 0) return 2
   return 0
@@ -143,17 +170,28 @@ function escalateContractIssues(
     orphanPaths: boolean
     stateCoverage: boolean
     runbookCoverage: boolean
+    strictWiring: boolean
   },
 ): void {
   const runbookSeverity = flags.runbookCoverage ? indexRunbookSeverity(space) : null
 
   for (const issue of issues) {
-    // --strict-contracts: A1 + A3 credential-related codes → error
+    // --strict-wiring: W1 wiring parity — steps must match declared
+    // calls/emits edges, http/event edges must carry a payload model.
+    if (flags.strictWiring) {
+      if (issue.code === 'WIRING_STEP_WITHOUT_CALL' || issue.code === 'STEP_VIA_MISSING') {
+        bump(issue, 'error')
+        continue
+      }
+    }
+    // --strict-contracts: A1 + A3 credential-related codes → error, plus
+    // W5 error-mapping closure (throws on the wire without a mapping row).
     if (flags.strictContracts) {
       if (
         issue.code === 'CONTRACT_CALL_CREDENTIAL_MISSING' ||
         issue.code === 'CONTRACT_CALL_HEADER_MISMATCH' ||
-        issue.code === 'CONTRACT_CALL_ENV_MISMATCH'
+        issue.code === 'CONTRACT_CALL_ENV_MISMATCH' ||
+        issue.code === 'THROWS_UNMAPPED'
       ) {
         bump(issue, 'error')
         continue
@@ -242,7 +280,8 @@ function severityRank(s: RunbookRef['severity']): number {
  */
 const WIRE_CAPTURE_STALE_DAYS = 30
 
-function checkWireCaptureFiles(space: Space, spaceDir: string): ValidationIssue[] {
+/** Exported for `pd handoff` — its 0-errors gate includes fs-level checks. */
+export function checkWireCaptureFiles(space: Space, spaceDir: string): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   const now = Date.now()
   const staleMs = WIRE_CAPTURE_STALE_DAYS * 24 * 60 * 60 * 1000

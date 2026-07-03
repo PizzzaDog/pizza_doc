@@ -15,8 +15,9 @@ steps:
     protocol: internal-call
   - from: module:web-frontend/component:orderClient
     to: module:api-server/domain:orders/component:OrderController
+    via: module:api-server/domain:orders/model:Order
     protocol: http
-    description: GET /api/orders.
+    description: GET /api/orders — response body is a list of Order.
   - from: module:api-server/domain:orders/component:OrderController
     to: module:api-server/domain:orders/component:OrderRepository
     protocol: internal-call

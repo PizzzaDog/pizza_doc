@@ -20,3 +20,48 @@ fields:
   - name: stripeChargeId
     type: string
     optional: true
+stateMachine:
+  field: status
+  states:
+    - paid
+    - preparing
+    - delivered
+    - cancelled
+  initial: paid
+  terminal:
+    - delivered
+    - cancelled
+  transitions:
+    - from: paid
+      to: preparing
+      trigger: KitchenNotifier.onOrderPlaced
+      actor: system
+      description: The kitchen display accepts the ticket created from orders.placed.
+    - from: paid
+      to: cancelled
+      trigger: support.refund
+      actor: user
+      guard: order has not started preparing
+      description: Support refunds the Stripe charge and cancels the order.
+    - from: preparing
+      to: delivered
+      trigger: courier.handoff
+      actor: user
+  scenarios:
+    - id: kitchen-accepts-order
+      given: an order persisted with status=paid
+      when: the kitchen display accepts the ticket
+      then:
+        - status == preparing
+    - id: refund-cancels-paid-order
+      given: an order in status=paid that the kitchen has not accepted
+      when: support triggers a refund
+      then:
+        - status == cancelled
+        - the Stripe charge is refunded
+    - id: redelivered-event-does-not-double-transition
+      given: an order already in status=preparing
+      when: orders.placed is redelivered for the same orderId
+      then:
+        - status == preparing
+        - no second kitchen ticket exists

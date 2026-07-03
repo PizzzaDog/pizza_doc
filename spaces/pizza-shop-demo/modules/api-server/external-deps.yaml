@@ -1,0 +1,9 @@
+- name: stripe
+  direction: outbound
+  protocol: https
+  endpoint: api.stripe.com
+  auth: bearer
+  usesConfigKey: STRIPE_API_KEY
+  consumer: module:api-server/domain:orders/component:PaymentGateway
+  purpose: Card charges for checkout (POST /v1/charges).
+  failureMode: A decline maps to 402 STRIPE_DECLINED with no retry — the customer retries checkout; a network failure fails the request before anything is persisted.

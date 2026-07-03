@@ -76,6 +76,12 @@ Every extractor emits lines like:
 - `_placement` is the only transport-only field; stripped by `pd import`.
 - Everything else mirrors the Zod schemas in
   [`packages/core/src/schema.ts`](../../packages/core/src/schema.ts).
+- `sourceRef` is **required** on every component / model / table line
+  (`path/to/decl.ts:12`, relative to the codebase root). It is the key
+  `pd drift` / `pd import` use to pair a renamed symbol with its stale
+  spec entity instead of forking it into add+delete — the line suffix
+  may drift, the file path must be right. An entity without `sourceRef`
+  silently opts out of rename detection and `pd anchors`.
 - Placeholder refs like `<FK-TABLE-REF:foo>` are tolerated; the user
   resolves them post-import using `pd validate`'s errors.
 

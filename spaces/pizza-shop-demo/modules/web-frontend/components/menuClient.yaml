@@ -2,10 +2,12 @@ kind: component
 id: menuClient
 name: menuClient
 type: client
-description: HTTP client for /api/menu/* and /api/admin/menu/*.
+description: HTTP client for /api/menu/* and /api/admin/menu/*. Public reads carry no credential; admin writes attach the session token.
 methods:
   - name: list
     returns: PizzaListResponse
+    calls:
+      - module:api-server/domain:menu/component:MenuController/method:list
     httpMethod: GET
     httpPath: /api/menu
   - name: create
@@ -13,6 +15,13 @@ methods:
       - name: request
         type: CreatePizzaRequest
     returns: Pizza
+    calls:
+      - target: module:api-server/domain:menu/component:MenuController/method:create
+        method: POST
+        path: /api/admin/menu
+        credential:
+          type: user-jwt
+          header: Authorization
     httpMethod: POST
     httpPath: /api/admin/menu
   - name: update
@@ -20,6 +29,13 @@ methods:
       - name: request
         type: UpdatePizzaRequest
     returns: Pizza
+    calls:
+      - target: module:api-server/domain:menu/component:MenuController/method:update
+        method: PATCH
+        path: /api/admin/menu/{id}
+        credential:
+          type: user-jwt
+          header: Authorization
     httpMethod: PATCH
     httpPath: /api/admin/menu/{id}
     description: "TODO: pizza id is in the URL path, not the body — do we want a separate {id, request} param shape to make that explicit?"

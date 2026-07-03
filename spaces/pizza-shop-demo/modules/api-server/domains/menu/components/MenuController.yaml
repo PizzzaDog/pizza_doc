@@ -17,6 +17,9 @@ methods:
     returns: Pizza
     httpMethod: POST
     httpPath: /api/admin/menu
+    routeAuth:
+      type: user-jwt
+      header: Authorization
     calls:
       - module:api-server/domain:menu/component:MenuService/method:add
     throws:
@@ -29,8 +32,12 @@ methods:
     returns: Pizza
     httpMethod: PATCH
     httpPath: /api/admin/menu/{id}
+    routeAuth:
+      type: user-jwt
+      header: Authorization
     calls:
       - module:api-server/domain:menu/component:MenuService/method:update
     throws:
       - UnauthorizedException
       - ValidationException
+      - PizzaNotFoundException

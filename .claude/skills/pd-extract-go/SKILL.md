@@ -183,9 +183,12 @@ shared `render.Error(w, err)` helper. Collect `errors.Is(…, SomeErr)
 Middleware functions mentioning role checks; JWT claim validation.
 Extract the required role and flag to `requires:`.
 
-### `sourceRef`
+### `sourceRef` (required)
 
-Every entity: `internal/user/user.go:12`.
+Every component / model / table: `internal/user/user.go:12`, relative
+to the codebase root. Contract, not courtesy: `pd drift` pairs renamed
+symbols by this file path and `pd anchors` resolves it in CI. Omitting
+it opts the entity out of both.
 
 ### `Model.topic` (event-kind)
 

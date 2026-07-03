@@ -28,6 +28,10 @@ steps:
     via: module:api-server/domain:users/model:CreateUserRequest
     protocol: internal-call
   - from: module:api-server/domain:users/component:UserService
+    to: module:api-server/domain:users/component:PasswordHasher
+    protocol: internal-call
+    description: Bcrypt-hash the raw password — plaintext never reaches the repository.
+  - from: module:api-server/domain:users/component:UserService
     to: module:api-server/domain:users/component:UserRepository
     via: module:api-server/domain:users/model:User
     protocol: internal-call

@@ -1,0 +1,26 @@
+- key: DB_URL
+  type: non-secret
+  lifecycle: startup
+  mutability: rotatable
+  consumer:
+    component: module:api-server
+    callsite: spring.datasource.url
+  description: JDBC URL for postgres-db; every repository in the module reads through the shared datasource.
+- key: STRIPE_API_KEY
+  type: secret
+  lifecycle: startup
+  mutability: rotatable
+  sourceOfTruth: "Stripe dashboard → Developers → API keys (live mode)"
+  consumer:
+    component: module:api-server/domain:orders/component:PaymentGateway
+    callsite: '@Value("${stripe.api-key}")'
+  description: Bearer key PaymentGateway sends to api.stripe.com; rotate by issuing a new restricted key and redeploying.
+- key: SESSION_TOKEN_PEPPER
+  type: secret
+  lifecycle: startup
+  mutability: immortal
+  sourceOfTruth: "generated once at first deploy; kept in the deploy host's secret store"
+  consumer:
+    component: module:api-server/domain:users/component:SessionTokenService
+    callsite: '@Value("${auth.session-pepper}")'
+  description: Server-side pepper mixed into session-token hashing. Rotation invalidates every live session, hence immortal.

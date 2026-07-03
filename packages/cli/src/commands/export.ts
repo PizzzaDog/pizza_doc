@@ -1,6 +1,9 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { collectBriefContext, exportSpaceForAi, renderImplementationBrief } from '@pizza-doc/core'
 import type {
+  AdrRef,
+  BriefContext,
   ErrorMapping,
   Field,
   Method,
@@ -20,17 +23,21 @@ import { allComponents, allModels, allTables } from '../util/space-walk.js'
  * `pd export <format> [flags]`
  *
  * Sub-commands:
+ *   - `ai` — full-space, full-fidelity markdown for LLMs (same artifact
+ *     as the UI export button).
  *   - `openapi` — OpenAPI 3.1 JSON/YAML from controllers + DTOs.
  *   - `implementation-brief <usecase-id>` — self-contained markdown for
  *     an LLM implementer.
  *
- * Both reads only. Output defaults to stdout; `--out <file>` writes to
+ * All read-only. Output defaults to stdout; `--out <file>` writes to
  * disk.
  */
 export async function cmdExport(args: ParsedArgs): Promise<number> {
   const sub = args.positional[0]
   const rest: ParsedArgs = { ...args, positional: args.positional.slice(1) }
   switch (sub) {
+    case 'ai':
+      return await exportAi(rest)
     case 'openapi':
       return await exportOpenApi(rest)
     case 'implementation-brief':
@@ -47,7 +54,7 @@ export async function cmdExport(args: ParsedArgs): Promise<number> {
     default:
       console.error(
         red(
-          'usage: pd export <openapi | implementation-brief <usecase-id> | typescript-types | go-types | go-interfaces> [spaces/<id>]',
+          'usage: pd export <ai | openapi | implementation-brief <usecase-id> | typescript-types | go-types | go-interfaces | operations> [spaces/<id>]',
         ),
       )
       return 2
@@ -429,257 +436,89 @@ function typeToSchemaBare(type: string): OpenApiSchema {
   }
 }
 
-// ---------- implementation-brief ----------
+// ---------- implementation-brief + full-space AI export ----------
 
+/**
+ * `pd export implementation-brief <usecase-id> [dir] [--out file]`
+ *
+ * Thin CLI wrapper over the core renderer (`renderImplementationBrief` +
+ * `collectBriefContext` in @pizza-doc/core): loads the space, reads the
+ * bodies of the ADRs the brief needs from disk (core stays fs-free so the
+ * web UI can run the same renderer in the browser), emits, and exits 1
+ * when the self-check found unresolved types — the brief is still written
+ * (it carries the diagnostic section), but a handoff artifact with
+ * phantom types must not pass a pipeline.
+ */
 async function exportImplementationBrief(args: ParsedArgs): Promise<number> {
   const ucid = args.positional[0]
   if (!ucid) {
     console.error(red('usage: pd export implementation-brief <usecase-id> [spaces/<id>]'))
     return 2
   }
-  const { space } = await loadSpaceForCli(resolveSpaceDir(args.positional[1]))
+  const dir = resolveSpaceDir(args.positional[1])
+  const { space } = await loadSpaceForCli(dir)
   const uc = space.useCases.find((u) => u.id === ucid)
   if (!uc) {
     console.error(red(`use case not found: ${ucid}`))
     return 1
   }
-  const brief = renderBrief(space, uc)
-  const out = typeof args.flags.out === 'string' ? args.flags.out : undefined
-  if (out) {
-    fs.mkdirSync(path.dirname(out), { recursive: true })
-    fs.writeFileSync(out, brief)
-    console.log(`${green('✓')} wrote ${path.relative(process.cwd(), out)}`)
-  } else {
-    process.stdout.write(brief)
+  const ctx = collectBriefContext(space, uc)
+  emit(renderBrief(space, uc, ctx, dir), readCodegenOptions(args))
+  if (ctx.unresolvedTypes.length > 0) {
+    console.error(
+      red(
+        `✗ ${ctx.unresolvedTypes.length} unresolved type(s) in this brief — fix the spec (pd validate flags TYPE_UNRESOLVED) before handing off.`,
+      ),
+    )
+    return 1
   }
   return 0
 }
 
-function renderBrief(space: Space, uc: UseCase): string {
-  const lines: string[] = []
-  const push = (...xs: string[]) => lines.push(...xs)
-
-  // ----- Header -----
-  push(`# Implementation brief: ${uc.name}`, '')
-  push(`> Use case id: \`${uc.id}\``)
-  push(`> Actor: \`${uc.actor}\``)
-  push(`> Trigger: ${uc.trigger}`)
-  if (space.meta.implementationLanguage) {
-    push(
-      `> Target stack: ${space.meta.implementationLanguage}${space.meta.implementationFramework ? `/${space.meta.implementationFramework}` : ''}`,
-    )
-  }
-  push('')
-  if (uc.description) push(uc.description, '')
-
-  // ----- Requires -----
-  if (uc.requires.length > 0) {
-    push('## Requirements (guards)', '')
-    for (const r of uc.requires) {
-      const bits: string[] = []
-      if (r.role) bits.push(`global role = ${r.role}`)
-      if (r.tenantRole) bits.push(`tenant role = ${r.tenantRole}`)
-      if (r.tenantContext !== undefined) bits.push(`tenantContext = ${r.tenantContext}`)
-      if (r.flag) bits.push(`feature flag = ${r.flag}`)
-      push(`- ${bits.join(', ')}${r.description ? ` — ${r.description}` : ''}`)
-    }
-    push('')
-  }
-
-  // ----- Steps -----
-  push('## Happy path', '')
-  for (const [i, s] of uc.steps.entries()) {
-    const via = s.via ? ` via \`${s.via}\`` : ''
-    const proto = s.protocol ? ` [${s.protocol}]` : ''
-    push(`${i + 1}. \`${s.from}\` → \`${s.to}\`${via}${proto}`)
-    if (s.description) push(`   ${s.description}`)
-  }
-  push('')
-
-  // ----- Error flows -----
-  if (uc.errorFlows.length > 0) {
-    push('## Error flows', '')
-    for (const ef of uc.errorFlows) {
-      push(`### ${ef.id}`, '', `**Condition:** ${ef.condition}`, '')
-      for (const [i, s] of ef.steps.entries()) {
-        push(`${i + 1}. \`${s.from}\` → \`${s.to}\`${s.description ? ` — ${s.description}` : ''}`)
-      }
-      if (ef.resultDescription) push('', `**Result:** ${ef.resultDescription}`)
-      push('')
-    }
-  }
-
-  // ----- Invariants -----
-  if (uc.invariants.pre.length > 0 || uc.invariants.post.length > 0) {
-    push('## Invariants', '')
-    if (uc.invariants.pre.length > 0) {
-      push('**Pre:**')
-      for (const x of uc.invariants.pre) push(`- ${x}`)
-      push('')
-    }
-    if (uc.invariants.post.length > 0) {
-      push('**Post:**')
-      for (const x of uc.invariants.post) push(`- ${x}`)
-      push('')
-    }
-  }
-
-  // ----- Data flow -----
-  if (uc.dataFlow.length > 0) {
-    push('## Data flow (field → column / DTO)', '')
-    for (const df of uc.dataFlow) {
-      const arrow = df.cardinality === 'many' ? '⇉' : '→'
-      push(
-        `- \`${df.sourceField}\` ${arrow} \`${df.targetField}\`${df.transform ? ` — ${df.transform}` : ''}`,
-      )
-    }
-    push('')
-  }
-
-  // ----- Referenced entities (flattened) -----
-  const refs = collectReferencedEntities(space, uc)
-  if (refs.models.length > 0) {
-    push('## Models referenced', '')
-    for (const m of refs.models) push(renderModelBlock(m))
-  }
-  if (refs.tables.length > 0) {
-    push('## Tables referenced', '')
-    for (const t of refs.tables) push(renderTableBlock(t))
-  }
-  if (refs.errorMapping.length > 0) {
-    push('## Exception → HTTP status mapping', '')
-    push('| exception | status | code |')
-    push('|---|---|---|')
-    for (const em of refs.errorMapping) {
-      push(`| ${em.exception} | ${em.httpStatus} | ${em.code ?? ''} |`)
-    }
-    push('')
-  }
-
-  push('---')
-  push(
-    '',
-    `Generated by \`pd export implementation-brief ${uc.id}\`. This brief is self-contained — everything the implementer needs to write correct-first-time code for this use case lives in this file.`,
-  )
-
-  return lines.join('\n')
+/**
+ * Core brief renderer with the CLI's fs leg: ADR bodies are read from
+ * `spaceDir` and injected via the `adrBodies` option. Exported (together
+ * with the re-exported `collectBriefContext`) for tests and downstream
+ * tooling.
+ */
+export function renderBrief(
+  space: Space,
+  uc: UseCase,
+  ctx: BriefContext,
+  spaceDir: string,
+): string {
+  return renderImplementationBrief(space, uc, ctx, {
+    adrBodies: readAdrBodies(spaceDir, ctx.decisions),
+  })
 }
 
-interface ReferencedBlock {
-  models: Model[]
-  tables: Table[]
-  errorMapping: ErrorMapping[]
-}
-
-function collectReferencedEntities(space: Space, uc: UseCase): ReferencedBlock {
-  const modelIds = new Set<string>()
-  const tableIds = new Set<string>()
-  const moduleIds = new Set<string>()
-
-  const eat = (ref: string | undefined): void => {
-    if (!ref) return
-    const modMatch = ref.match(/^module:([^/]+)/)
-    if (modMatch?.[1]) moduleIds.add(modMatch[1])
-    const modelMatch = ref.match(/\/model:([^/]+)/)
-    if (modelMatch?.[1]) modelIds.add(modelMatch[1])
-    const tableMatch = ref.match(/\/table:([^/]+)/)
-    if (tableMatch?.[1]) tableIds.add(tableMatch[1])
-  }
-
-  for (const step of uc.steps) {
-    eat(step.from)
-    eat(step.to)
-    eat(step.via)
-  }
-  for (const ef of uc.errorFlows)
-    for (const s of ef.steps) {
-      eat(s.from)
-      eat(s.to)
-      eat(s.via)
-    }
-  for (const df of uc.dataFlow) {
-    const src = df.sourceField.split('.')[0]
-    const tgt = df.targetField.split('.')[0]
-    if (src) modelIds.add(src) // may be a model or a table — we check both
-    if (tgt) {
-      modelIds.add(tgt)
-      tableIds.add(tgt)
+function readAdrBodies(spaceDir: string, decisions: readonly AdrRef[]): Map<string, string> {
+  const bodies = new Map<string, string>()
+  for (const adr of decisions) {
+    try {
+      const raw = fs.readFileSync(path.join(spaceDir, adr.path), 'utf8')
+      const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim()
+      if (body.length > 0) bodies.set(adr.id, body)
+    } catch {
+      // Unreadable body — the brief falls back to a path reference.
     }
   }
-
-  const models: Model[] = []
-  for (const { model } of allModels(space)) {
-    if (modelIds.has(model.id) || modelIds.has(model.name)) models.push(model)
-  }
-  const tables: Table[] = []
-  for (const { table } of allTables(space)) {
-    if (tableIds.has(table.id) || tableIds.has(table.name)) tables.push(table)
-  }
-  const errorMapping: ErrorMapping[] = []
-  for (const mod of space.modules) {
-    if (!moduleIds.has(mod.id)) continue
-    for (const em of mod.errorMapping ?? []) errorMapping.push(em)
-  }
-
-  return { models, tables, errorMapping }
+  return bodies
 }
 
-function renderModelBlock(m: Model): string {
-  const lines: string[] = []
-  lines.push(`### ${m.name} (${m.modelKind})`)
-  if (m.description) lines.push('', m.description)
-  if (m.persistedAs) lines.push('', `_Persisted as:_ \`${m.persistedAs}\``)
-  lines.push('')
-  lines.push('| field | type | optional | validation |')
-  lines.push('|---|---|---|---|')
-  for (const f of m.fields) {
-    const v = f.validation ? formatValidation(f.validation) : ''
-    lines.push(`| ${f.name} | ${f.type} | ${f.optional ? 'yes' : ''} | ${v} |`)
-  }
-  if (m.stateMachine) {
-    lines.push('', `**State machine on field \`${m.stateMachine.field}\`:**`)
-    lines.push(`- states: ${m.stateMachine.states.join(', ')}`)
-    if (m.stateMachine.initial) lines.push(`- initial: ${m.stateMachine.initial}`)
-    if (m.stateMachine.terminal.length > 0)
-      lines.push(`- terminal: ${m.stateMachine.terminal.join(', ')}`)
-    lines.push('- transitions:')
-    for (const t of m.stateMachine.transitions) {
-      const tos = Array.isArray(t.to) ? t.to.join(' | ') : t.to
-      lines.push(
-        `  - ${t.from} → ${tos}${t.on ? ` on \`${t.on}\`` : ''}${t.guard ? ` guard: ${t.guard}` : ''}`,
-      )
-    }
-  }
-  if (m.topic) lines.push('', `**Topic:** \`${m.topic}\``)
-  lines.push('')
-  return lines.join('\n')
-}
+export { collectBriefContext } from '@pizza-doc/core'
 
-function renderTableBlock(t: Table): string {
-  const lines: string[] = []
-  lines.push(`### ${t.name}`)
-  if (t.description) lines.push('', t.description, '')
-  lines.push('| column | sql type | null | default | pk | fk |')
-  lines.push('|---|---|---|---|---|---|')
-  for (const c of t.columns) {
-    lines.push(
-      `| ${c.name} | ${c.sqlType} | ${c.nullable ? 'yes' : ''} | ${c.default ?? ''} | ${c.primaryKey ? 'yes' : ''} | ${c.foreignKey ? `${c.foreignKey.table}.${c.foreignKey.column}` : ''} |`,
-    )
-  }
-  lines.push('')
-  return lines.join('\n')
-}
-
-function formatValidation(v: Validation): string {
-  const bits: string[] = []
-  if (v.format) bits.push(`format=${v.format}`)
-  if (v.minLength !== undefined) bits.push(`minLen=${v.minLength}`)
-  if (v.maxLength !== undefined) bits.push(`maxLen=${v.maxLength}`)
-  if (v.min !== undefined) bits.push(`min=${v.min}`)
-  if (v.max !== undefined) bits.push(`max=${v.max}`)
-  if (v.pattern) bits.push(`pattern=${v.pattern}`)
-  if (v.enumValues) bits.push(`enum=${v.enumValues.join('\\|')}`)
-  return bits.join(', ')
+/**
+ * `pd export ai [dir] [--out file]`
+ *
+ * Full-space AI export — the same artifact as the UI's export button:
+ * full-fidelity markdown of everything the schema knows, with the
+ * validation summary computed from this load.
+ */
+async function exportAi(args: ParsedArgs): Promise<number> {
+  const dir = resolveSpaceDir(args.positional[0])
+  const loaded = await loadSpaceForCli(dir)
+  return emit(exportSpaceForAi(loaded.space, { issues: loaded.issues }), readCodegenOptions(args))
 }
 
 // ==========================================================================

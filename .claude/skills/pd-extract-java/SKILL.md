@@ -269,11 +269,13 @@ for endpoints under a tenant-filtered path. Use-case yaml is written by
 the orchestrator, not by this extractor — so note what you saw and tell
 the user.
 
-### `sourceRef`
+### `sourceRef` (required)
 
-**Every** entity gets a `sourceRef` pointing at its declaration file
-(relative to the codebase root), optionally `:line`. Makes
-`pd-drift-auditor` deterministic.
+**Every** component / model / table gets a `sourceRef` pointing at its
+declaration file (relative to the codebase root), optionally `:line`.
+Contract, not courtesy: `pd drift` pairs renamed symbols by this file
+path (RENAME instead of add+delete), `pd anchors` resolves it in CI.
+Omitting it opts the entity out of both.
 
 ```json
 {"kind":"model","id":"User",...,"sourceRef":"apps/backend/src/main/java/online/restik/identity/internal/domain/User.java:12"}

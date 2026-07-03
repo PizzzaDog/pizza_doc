@@ -9,6 +9,8 @@ methods:
       - name: request
         type: CreateUserRequest
     returns: RegisterResponse
+    calls:
+      - module:api-server/domain:users/component:AuthController/method:signup
     httpMethod: POST
     httpPath: /api/auth/signup
   - name: login
@@ -16,5 +18,7 @@ methods:
       - name: request
         type: LoginRequest
     returns: LoginResponse
+    calls:
+      - module:api-server/domain:users/component:AuthController/method:login
     httpMethod: POST
     httpPath: /api/auth/login

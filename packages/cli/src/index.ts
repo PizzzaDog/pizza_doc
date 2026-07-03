@@ -13,6 +13,7 @@ import { cmdDrift } from './commands/drift.js'
 import { cmdEndpoints } from './commands/endpoints.js'
 import { cmdExplain } from './commands/explain.js'
 import { cmdExport } from './commands/export.js'
+import { cmdHandoff } from './commands/handoff.js'
 import { cmdImport } from './commands/import.js'
 import { cmdInit } from './commands/init.js'
 import { cmdLint } from './commands/lint.js'
@@ -73,6 +74,8 @@ export async function runCli(argv = process.argv.slice(2), io: CliIo = defaultIo
         return await cmdImport(parsed)
       case 'validate':
         return await cmdValidate(parsed)
+      case 'handoff':
+        return await cmdHandoff(parsed)
       case 'readiness':
         return await cmdReadiness(parsed)
       case 'coverage':
@@ -144,11 +147,17 @@ ${bold('bulk import:')}
 
 ${bold('quality gates:')}
   ${cyan('validate')}      [<dir>] [--change <id>] [--strict-warnings] [--verbose]
-                                v0.3 opt-in contract flags (A5):
+                                opt-in contract flags:
                                   --strict-contracts        caller/callee credential parity → error
                                   --check-orphan-paths      caller path ↔ callee route → error
                                   --check-state-coverage    state machine scenarios → error
                                   --check-runbook-coverage  errorFlow → runbook (severity-aware)
+                                  --strict-wiring           step↔calls parity + step payload (via) → error
+  ${cyan('handoff')}       <usecase-id> [<dir>] [--json]
+                                implementer gate for ONE use case: 0 errors
+                                + type closure + step↔call parity + via
+                                + throws mapped + event idempotency ⇒ exit 0
+                                (then export the implementation-brief)
   ${cyan('readiness')}     [<dir>] [--profile production] [--min-endpoints 100] ...
                                 [--drift-from-jsonl <file>]
                                 [--check-anchors] [--require-anchors] [--code-root <dir>]
@@ -160,7 +169,10 @@ ${bold('quality gates:')}
   ${cyan('dataflow')}      <Model.field> [<dir>]
   ${cyan('diff')}          <git-ref> [<dir>]
   ${cyan('diff')}          --change <id> [<dir>]
-  ${cyan('drift')}         --from-jsonl <code-extract.jsonl> [<dir>]
+  ${cyan('drift')}         --from-jsonl <code-extract.jsonl> [<dir>] [--json]
+                                diffs a code extract against the space; renamed
+                                symbols are paired by sourceRef file (RENAME),
+                                not reported as add+delete
   ${cyan('anchors')}       [<dir>] [--code-root <dir>] [--module-root <id>=<dir>]...
                                 [--require-all] [--json]
                                 deterministic spec↔code check: every sourceRef
@@ -187,9 +199,12 @@ ${bold('exploration / export:')}
   ${cyan('ui')}            [--port <n>] [--change <id>] [--global] [--no-open]
                                 serve the web app; cwd .pizza-doc opens automatically
   ${cyan('watch')}         [<dir>]                         live revalidate
+  ${cyan('export')}        ai [--out <file>]               full-space markdown for LLMs
+                                (full fidelity: validation, SMs, events, config, ADRs)
   ${cyan('export')}        openapi [--out <file>]          OpenAPI 3.1 JSON
   ${cyan('export')}        implementation-brief <ucid> [--out <file>]
                                 self-contained markdown for LLM implementer
+                                (exit 1 when the type self-check fails)
   ${cyan('export')}        typescript-types [--out <file>] DTOs/enums as TS interfaces + unions
   ${cyan('export')}        go-types [--package <name>] [--out <file>]
                                 DTOs/enums as Go structs + typed string consts

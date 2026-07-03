@@ -205,9 +205,12 @@ Django custom middleware mapping exceptions → responses. Collect each
 FastAPI dependencies like `Depends(require_role("SUPER_ADMIN"))`,
 Django `@permission_required`, custom auth middleware role checks.
 
-### `sourceRef`
+### `sourceRef` (required)
 
-Every entity: `apps/api/app/models/user.py:12`.
+Every component / model / table: `apps/api/app/models/user.py:12`,
+relative to the codebase root. Contract, not courtesy: `pd drift` pairs
+renamed symbols by this file path and `pd anchors` resolves it in CI.
+Omitting it opts the entity out of both.
 
 ### `Model.topic` (event-kind)
 

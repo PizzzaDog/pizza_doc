@@ -1,0 +1,6 @@
+kind: module
+id: notification-worker
+name: Notification Worker
+type: service
+techStack: Spring Boot 3 + Java 21
+description: Consumes order events and drives the kitchen display; deliberately isolated from the request path so a display outage cannot fail checkout.

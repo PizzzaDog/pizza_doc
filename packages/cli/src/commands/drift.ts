@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Component, Model, Space, Table } from '@pizza-doc/core'
+import { parseSourceRef } from '../util/anchors.js'
 import type { ParsedArgs } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
 import { loadSpaceForCli } from '../util/load.js'
@@ -8,13 +9,23 @@ import { resolveSpaceDir } from '../util/space-path.js'
 import { allComponents, allModels, allTables } from '../util/space-walk.js'
 
 /**
- * `pd drift --from-jsonl <file> [spaces/<id>]`
+ * `pd drift --from-jsonl <file> [spaces/<id>] [--json]`
  *
  * Reads a JSONL code-side snapshot (produced by a `pd-extract-<lang>`
  * agent skill running in read-only mode) and diffs it against the
  * current state of the target space. Emits an actionable drift report:
  * what the code has that the spec doesn't, what the spec claims that the
  * code lacks, and what's shared-but-drifted on the field level.
+ *
+ * Renames (v0.6 — code-anchoring Phase 3): tables/models match by id
+ * first, then the unmatched leftovers are paired by `sourceRef` FILE
+ * (line suffixes shift on every extract, so they are ignored). A pair
+ * means the code renamed the symbol — one RENAME line instead of a fork
+ * into codeOnly + spaceOnly, and field drift is still computed across
+ * the pair.
+ *
+ * `--json` prints the full structured diff (review tooling / auto-apply)
+ * instead of the human report; exit codes are unchanged.
  *
  * Exits:
  *   0 — in sync (green).
@@ -24,7 +35,7 @@ import { allComponents, allModels, allTables } from '../util/space-walk.js'
 export async function cmdDrift(args: ParsedArgs): Promise<number> {
   const jsonlFlag = args.flags['from-jsonl']
   if (typeof jsonlFlag !== 'string') {
-    console.error(red('usage: pd drift --from-jsonl <file> [spaces/<id>]'))
+    console.error(red('usage: pd drift --from-jsonl <file> [spaces/<id>] [--json]'))
     return 2
   }
   if (!fs.existsSync(jsonlFlag)) {
@@ -38,12 +49,31 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
   const spaceInv = indexSpace(space)
   const codeInv = indexCode(codeSide)
 
-  const tableDiff = diffById(spaceInv.tables, codeInv.tables)
-  const modelDiff = diffById(spaceInv.models, codeInv.models)
+  // v0.6 (code-anchoring Phase 3): a renamed code symbol used to fork the
+  // report into codeOnly + spaceOnly; pair the leftovers by sourceRef file.
+  const tableDiff = pairRenames(
+    spaceInv.tables,
+    codeInv.tables,
+    diffById(spaceInv.tables, codeInv.tables),
+  )
+  const modelDiff = pairRenames(
+    spaceInv.models,
+    codeInv.models,
+    diffById(spaceInv.models, codeInv.models),
+  )
   const endpointDiff = diffByKey(spaceInv.endpoints, codeInv.endpoints)
 
-  const fieldDiffs = computeFieldDiffs(spaceInv.models, codeInv.models)
-  const columnDiffs = computeColumnDiffs(spaceInv.tables, codeInv.tables)
+  // Field comparison follows the rename pairs: the renamed code entity is
+  // re-keyed to its space id so `OrderDto → OrderResponse` still gets a
+  // field-level diff.
+  const fieldDiffs = computeFieldDiffs(
+    spaceInv.models,
+    applyRenames(codeInv.models, modelDiff.renamed),
+  )
+  const columnDiffs = computeColumnDiffs(
+    spaceInv.tables,
+    applyRenames(codeInv.tables, tableDiff.renamed),
+  )
 
   // v0.3 ops drift: code-side config refs and external calls compared
   // against per-module config-map / external-deps in the spec.
@@ -58,7 +88,10 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
   const stateEnums = computeStateEnumDrift(space, codeSide)
   const hostAssetPaths = computeHostAssetPathDrift(space, codeSide)
 
+  const renameCount = tableDiff.renamed.length + modelDiff.renamed.length
+
   const total =
+    renameCount +
     tableDiff.codeOnly.length +
     tableDiff.spaceOnly.length +
     modelDiff.codeOnly.length +
@@ -74,7 +107,10 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
     stateEnums.length +
     hostAssetPaths.length
 
+  // Renames count as significant: every ref in the space still points at
+  // the old id, so the spec stays broken until the rename is applied.
   const significant =
+    renameCount +
     tableDiff.codeOnly.length +
     modelDiff.codeOnly.length +
     endpointDiff.codeOnly.length +
@@ -85,10 +121,40 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
     stateEnums.length +
     hostAssetPaths.length
 
+  const verdictKind = total === 0 ? 'in-sync' : significant > 0 ? 'significant' : 'minor'
+
+  // v0.6 (code-anchoring Phase 3) — structured diff for review tooling
+  // and auto-apply. Same exit semantics as the human report.
+  if (args.flags.json === true) {
+    console.log(
+      JSON.stringify(
+        {
+          space: space.meta.id,
+          jsonl: path.relative(process.cwd(), jsonlFlag),
+          verdict: verdictKind,
+          tables: tableDiff,
+          models: modelDiff,
+          endpoints: endpointDiff,
+          fieldDrift: fieldDiffs,
+          columnDrift: columnDiffs,
+          configRefs,
+          externalCalls,
+          routes,
+          outboundCalls,
+          stateEnums,
+          hostAssetPaths,
+        },
+        null,
+        2,
+      ),
+    )
+    return total === 0 ? 0 : 1
+  }
+
   const verdict =
-    total === 0
+    verdictKind === 'in-sync'
       ? green('✓ in sync')
-      : significant > 0
+      : verdictKind === 'significant'
         ? red('✗ significant drift')
         : yellow('⚠ minor drift')
 
@@ -99,6 +165,7 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
   console.log(
     `  counts: tables ${tableDiff.codeOnly.length}/${tableDiff.spaceOnly.length}/${columnDiffs.length}  ·  ` +
       `models ${modelDiff.codeOnly.length}/${modelDiff.spaceOnly.length}/${fieldDiffs.length}  ·  ` +
+      `renames ${renameCount}  ·  ` +
       `endpoints ${endpointDiff.codeOnly.length}/${endpointDiff.spaceOnly.length}  ·  ` +
       `config-refs ${configRefs.length}  ·  ext-calls ${externalCalls.length}`,
   )
@@ -121,6 +188,11 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
     ...tableDiff.spaceOnly.map((id) => `table: ${id}`),
     ...modelDiff.spaceOnly.map((id) => `model: ${id}`),
     ...endpointDiff.spaceOnly.map((k) => `endpoint: ${k}`),
+  ])
+
+  printBlock(yellow('RENAME — same sourceRef file, different id (code renamed the symbol):'), [
+    ...tableDiff.renamed.map((r) => `table: ${r.from} → ${r.to}  (${r.file})`),
+    ...modelDiff.renamed.map((r) => `model: ${r.from} → ${r.to}  (${r.file})`),
   ])
 
   printBlock(
@@ -186,6 +258,13 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
       dim('  · for drifted fields/columns: edit yaml by hand OR re-extract + `pd import --force`'),
     )
   }
+  if (renameCount > 0) {
+    console.log(
+      dim(
+        '  · for renames: change the yaml id AND every ref pointing at the old id (grep for it) — `pd import` refuses to fork a detected rename',
+      ),
+    )
+  }
   // v0.3 (A6) — `--fail-on-error` ensures CI gating semantics. Without
   // the flag, drift still exits non-zero (existing behavior); with it,
   // we double-down on the contract that drift = build failure.
@@ -199,6 +278,7 @@ interface CodeEntry {
   kind?: string
   id?: string
   name?: string
+  sourceRef?: string
   fields?: Array<{ name?: string; type?: string }>
   columns?: Array<{ name?: string; sqlType?: string }>
   methods?: Array<{
@@ -237,10 +317,13 @@ interface Inventory {
 interface TableShape {
   id: string
   columns: Map<string, string> // name → sqlType
+  /** Declaration file — the rename-pairing key (line suffix ignored). */
+  sourceRef?: string
 }
 interface ModelShape {
   id: string
   fields: Map<string, string> // name → type
+  sourceRef?: string
 }
 interface EndpointShape {
   key: string // METHOD path
@@ -275,11 +358,15 @@ function indexCode(entries: CodeEntry[]): Inventory {
     if (e.kind === 'table' && e.id) {
       const cols = new Map<string, string>()
       for (const c of e.columns ?? []) if (c.name) cols.set(c.name, c.sqlType ?? '')
-      tables.set(e.id, { id: e.id, columns: cols })
+      const shape: TableShape = { id: e.id, columns: cols }
+      if (typeof e.sourceRef === 'string') shape.sourceRef = e.sourceRef
+      tables.set(e.id, shape)
     } else if (e.kind === 'model' && e.id) {
       const fs = new Map<string, string>()
       for (const f of e.fields ?? []) if (f.name) fs.set(f.name, f.type ?? '')
-      models.set(e.id, { id: e.id, fields: fs })
+      const shape: ModelShape = { id: e.id, fields: fs }
+      if (typeof e.sourceRef === 'string') shape.sourceRef = e.sourceRef
+      models.set(e.id, shape)
     } else if (e.kind === 'component') {
       for (const m of e.methods ?? []) {
         if (m.httpMethod && m.httpPath) {
@@ -297,12 +384,16 @@ function indexCode(entries: CodeEntry[]): Inventory {
 function tableShape(t: Table): TableShape {
   const cols = new Map<string, string>()
   for (const c of t.columns) cols.set(c.name, c.sqlType)
-  return { id: t.id, columns: cols }
+  const shape: TableShape = { id: t.id, columns: cols }
+  if (t.sourceRef) shape.sourceRef = t.sourceRef
+  return shape
 }
 function modelShape(m: Model): ModelShape {
   const fields = new Map<string, string>()
   for (const f of m.fields) fields.set(f.name, f.type)
-  return { id: m.id, fields }
+  const shape: ModelShape = { id: m.id, fields }
+  if (m.sourceRef) shape.sourceRef = m.sourceRef
+  return shape
 }
 
 function endpointKey(method: string, pathSpec: string): string {
@@ -324,6 +415,84 @@ function diffById<T>(space: Map<string, T>, code: Map<string, T>): IdDiff {
 }
 function diffByKey<T>(space: Map<string, T>, code: Map<string, T>): IdDiff {
   return diffById(space, code)
+}
+
+// ---------- rename pairing (v0.6 — code-anchoring Phase 3) ----------
+
+interface RenamePair {
+  /** Space-side id (the stale one). */
+  from: string
+  /** Code-side id (what the symbol is called now). */
+  to: string
+  /** The shared sourceRef file that made the pair. */
+  file: string
+}
+
+interface PairedDiff extends IdDiff {
+  renamed: RenamePair[]
+}
+
+/**
+ * Pair unmatched space/code entities citing the SAME `sourceRef` file —
+ * that's a rename, not an add+delete. Line suffixes are stripped (they
+ * shift on every extract). Conservative on purpose: a pair forms only
+ * when the file maps to exactly one unmatched entity on each side, so a
+ * multi-entity file (`models.py`) degrades to the plain
+ * codeOnly/spaceOnly report instead of guessing.
+ */
+function pairRenames<T extends { sourceRef?: string }>(
+  space: Map<string, T>,
+  code: Map<string, T>,
+  diff: IdDiff,
+): PairedDiff {
+  const byFile = (ids: string[], side: Map<string, T>): Map<string, string[]> => {
+    const out = new Map<string, string[]>()
+    for (const id of ids) {
+      const ref = side.get(id)?.sourceRef
+      if (!ref) continue
+      const file = parseSourceRef(ref).filePath
+      out.set(file, [...(out.get(file) ?? []), id])
+    }
+    return out
+  }
+  const spaceFiles = byFile(diff.spaceOnly, space)
+  const codeFiles = byFile(diff.codeOnly, code)
+  const renamed: RenamePair[] = []
+  const claimedFrom = new Set<string>()
+  const claimedTo = new Set<string>()
+  for (const [file, fromIds] of spaceFiles) {
+    const toIds = codeFiles.get(file)
+    if (!toIds || fromIds.length !== 1 || toIds.length !== 1) continue
+    const from = fromIds[0]
+    const to = toIds[0]
+    if (!from || !to) continue
+    renamed.push({ from, to, file })
+    claimedFrom.add(from)
+    claimedTo.add(to)
+  }
+  renamed.sort((a, b) => a.from.localeCompare(b.from))
+  return {
+    renamed,
+    codeOnly: diff.codeOnly.filter((id) => !claimedTo.has(id)),
+    spaceOnly: diff.spaceOnly.filter((id) => !claimedFrom.has(id)),
+  }
+}
+
+/**
+ * Re-key renamed code entities to their space id so the field/column
+ * comparison still runs across the pair.
+ */
+function applyRenames<T>(code: Map<string, T>, renamed: RenamePair[]): Map<string, T> {
+  if (renamed.length === 0) return code
+  const out = new Map(code)
+  for (const r of renamed) {
+    const entity = out.get(r.to)
+    if (entity !== undefined) {
+      out.set(r.from, entity)
+      out.delete(r.to)
+    }
+  }
+  return out
 }
 
 interface FieldDiff {

@@ -40,6 +40,7 @@ export default defineConfig({
           items: [
             { label: 'YAML format', link: '/reference/yaml-format/' },
             { label: 'Validation rules', link: '/reference/validation-rules/' },
+            { label: 'CLI commands', link: '/reference/cli/' },
             { label: 'AI export format', link: '/reference/ai-export/' },
             { label: 'Keyboard shortcuts', link: '/reference/keyboard-shortcuts/' },
           ],

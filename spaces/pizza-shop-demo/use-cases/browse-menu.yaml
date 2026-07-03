@@ -15,8 +15,9 @@ steps:
     protocol: internal-call
   - from: module:web-frontend/component:menuClient
     to: module:api-server/domain:menu/component:MenuController
+    via: module:api-server/domain:menu/model:PizzaListResponse
     protocol: http
-    description: GET /api/menu.
+    description: GET /api/menu — response body is PizzaListResponse.
   - from: module:api-server/domain:menu/component:MenuController
     to: module:api-server/domain:menu/component:MenuService
     protocol: internal-call
@@ -27,3 +28,7 @@ steps:
     to: module:postgres-db/domain:menu/table:pizzas
     protocol: sql
     description: SELECT * FROM pizzas WHERE available = true.
+  - from: module:web-frontend/component:MenuPage
+    to: module:web-frontend/component:PizzaCard
+    protocol: internal-call
+    description: Render one PizzaCard per pizza from the PizzaListResponse.

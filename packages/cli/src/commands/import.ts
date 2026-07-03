@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse as parseYaml } from 'yaml'
+import { parseSourceRef } from '../util/anchors.js'
 import type { ParsedArgs } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
 import { findSpaceRoot, listSpacesIn } from '../util/space-path.js'
@@ -32,6 +33,14 @@ import { writeYamlFile } from '../util/yaml-emit.js'
  *
  * Errors write nothing (transactional-ish) so a partial import never
  * half-destroys the target space.
+ *
+ * Rename guard (v0.6 — code-anchoring Phase 3): an incoming NEW entity
+ * whose `sourceRef` file is already cited by an existing same-kind
+ * entity with a different id — an id this import does NOT also carry —
+ * is almost certainly a rename in code. Writing it would fork the spec
+ * (the old yaml lingers and every ref keeps pointing at it), so the
+ * entry is skipped with a rename hint instead. Ambiguous matches
+ * (several candidates in one file) are left alone.
  */
 export async function cmdImport(args: ParsedArgs): Promise<number> {
   const file = typeof args.flags['from-jsonl'] === 'string' ? args.flags['from-jsonl'] : undefined
@@ -54,7 +63,7 @@ export async function cmdImport(args: ParsedArgs): Promise<number> {
     .readFileSync(file, 'utf8')
     .split('\n')
     .filter((l) => l.trim())
-  const plans: Array<{ filePath: string; body: unknown }> = []
+  const plans: PlanEntry[] = []
   const errors: string[] = []
 
   for (let i = 0; i < lines.length; i++) {
@@ -74,7 +83,7 @@ export async function cmdImport(args: ParsedArgs): Promise<number> {
     }
     // Strip the `_placement` envelope before writing — it's transport-only.
     const body = Object.fromEntries(Object.entries(entry).filter(([key]) => key !== '_placement'))
-    plans.push({ filePath: resolved.filePath, body })
+    plans.push({ filePath: resolved.filePath, body, spaceDir: resolved.spaceDir })
   }
 
   if (errors.length > 0) {
@@ -82,19 +91,34 @@ export async function cmdImport(args: ParsedArgs): Promise<number> {
     return 1
   }
 
+  // v0.6 (code-anchoring Phase 3) — rename guard, see the doc comment.
+  const renameSkips = detectRenameForks(plans)
+
   console.log(
     `${bold(cyan('import plan:'))} ${plans.length} entit${plans.length === 1 ? 'y' : 'ies'} from ${path.relative(process.cwd(), file)}`,
   )
   if (dryRun) {
     for (const { filePath } of plans) {
-      console.log(`  ${dim('would write')} ${path.relative(process.cwd(), filePath)}`)
+      const hint = renameSkips.get(filePath)
+      if (hint) {
+        console.log(`  ${yellow('would skip')} ${path.relative(process.cwd(), filePath)}: ${hint}`)
+      } else {
+        console.log(`  ${dim('would write')} ${path.relative(process.cwd(), filePath)}`)
+      }
     }
     return 0
   }
 
   let written = 0
   let skipped = 0
+  let renameSkipped = 0
   for (const { filePath, body } of plans) {
+    const renameHint = renameSkips.get(filePath)
+    if (renameHint) {
+      console.log(`${yellow('~')} ${path.relative(process.cwd(), filePath)}: ${renameHint}`)
+      renameSkipped++
+      continue
+    }
     const res = writeImportFile(filePath, body, { force, merge })
     if (res.wrote) {
       console.log(
@@ -107,7 +131,7 @@ export async function cmdImport(args: ParsedArgs): Promise<number> {
     }
   }
   console.log(
-    `\n${bold(`${written} written`)}${skipped > 0 ? `, ${yellow(`${skipped} skipped (use --force to overwrite)`)}` : ''}`,
+    `\n${bold(`${written} written`)}${skipped > 0 ? `, ${yellow(`${skipped} skipped (use --force to overwrite)`)}` : ''}${renameSkipped > 0 ? `, ${yellow(`${renameSkipped} rename-guarded (apply the rename in yaml; drop sourceRef to force a fork)`)}` : ''}`,
   )
   return 0
 }
@@ -123,6 +147,13 @@ interface ImportEntry {
     domain?: string
   }
   [key: string]: unknown
+}
+
+interface PlanEntry {
+  filePath: string
+  body: Record<string, unknown>
+  /** Root of the space this entry resolves into — the rename guard scans it. */
+  spaceDir: string
 }
 
 interface ImportContext {
@@ -164,7 +195,7 @@ function buildImportContext(
 function resolvePath(
   entry: ImportEntry,
   ctx: ImportContext,
-): { ok: true; filePath: string } | { ok: false; reason: string } {
+): { ok: true; filePath: string; spaceDir: string } | { ok: false; reason: string } {
   const p = entry._placement ?? {}
   const spaceDir = resolveSpaceDirForEntry(p.spaceId, ctx)
   if (!spaceDir) {
@@ -179,17 +210,17 @@ function resolvePath(
 
   // The space.yaml itself doesn't carry `kind:` — detect via meta.
   if (entry.meta && typeof entry.meta === 'object') {
-    return { ok: true, filePath: path.join(spaceDir, 'space.yaml') }
+    return { ok: true, filePath: path.join(spaceDir, 'space.yaml'), spaceDir }
   }
 
   if (kind === 'actor' && id) {
-    return { ok: true, filePath: path.join(spaceDir, 'actors', `${id}.yaml`) }
+    return { ok: true, filePath: path.join(spaceDir, 'actors', `${id}.yaml`), spaceDir }
   }
   if (kind === 'module' && id) {
-    return { ok: true, filePath: path.join(spaceDir, 'modules', id, 'module.yaml') }
+    return { ok: true, filePath: path.join(spaceDir, 'modules', id, 'module.yaml'), spaceDir }
   }
   if (kind === 'usecase' && id) {
-    return { ok: true, filePath: path.join(spaceDir, 'use-cases', `${id}.yaml`) }
+    return { ok: true, filePath: path.join(spaceDir, 'use-cases', `${id}.yaml`), spaceDir }
   }
 
   if (!p.module || !id) {
@@ -203,12 +234,18 @@ function resolvePath(
     : path.join(spaceDir, 'modules', p.module)
 
   // domain.yaml comes in without `kind:` — detect by missing kind + domain placement.
-  if (!kind && p.domain) return { ok: true, filePath: path.join(baseDir, 'domain.yaml') }
-  if (kind === 'component') {
-    return { ok: true, filePath: path.join(baseDir, 'components', `${id}.yaml`) }
+  if (!kind && p.domain) {
+    return { ok: true, filePath: path.join(baseDir, 'domain.yaml'), spaceDir }
   }
-  if (kind === 'model') return { ok: true, filePath: path.join(baseDir, 'models', `${id}.yaml`) }
-  if (kind === 'table') return { ok: true, filePath: path.join(baseDir, 'tables', `${id}.yaml`) }
+  if (kind === 'component') {
+    return { ok: true, filePath: path.join(baseDir, 'components', `${id}.yaml`), spaceDir }
+  }
+  if (kind === 'model') {
+    return { ok: true, filePath: path.join(baseDir, 'models', `${id}.yaml`), spaceDir }
+  }
+  if (kind === 'table') {
+    return { ok: true, filePath: path.join(baseDir, 'tables', `${id}.yaml`), spaceDir }
+  }
   return { ok: false, reason: `could not resolve path for entry kind=${kind ?? '?'}` }
 }
 
@@ -326,4 +363,89 @@ function stableArrayKey(items: unknown[]): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// ---------- rename guard (v0.6 — code-anchoring Phase 3) ----------
+
+const RENAME_GUARDED_KINDS = new Set(['component', 'model', 'table'])
+
+/**
+ * Map plan filePath → human hint for incoming NEW entities whose
+ * `sourceRef` file is already cited by an existing same-kind entity with
+ * a different id that this import does not also carry. Writing such a
+ * plan forks a renamed symbol into two yamls — the fix is a rename.
+ */
+function detectRenameForks(plans: ReadonlyArray<PlanEntry>): Map<string, string> {
+  const out = new Map<string, string>()
+  const bySpace = new Map<string, PlanEntry[]>()
+  for (const p of plans) {
+    bySpace.set(p.spaceDir, [...(bySpace.get(p.spaceDir) ?? []), p])
+  }
+  for (const [spaceDir, spacePlans] of bySpace) {
+    // Ids arriving in this import, per kind — an existing entity that is
+    // itself re-imported is alive in the code, not renamed.
+    const incoming = new Set<string>()
+    for (const p of spacePlans) {
+      if (typeof p.body.kind === 'string' && typeof p.body.id === 'string') {
+        incoming.add(`${p.body.kind}|${p.body.id}`)
+      }
+    }
+    // Existing entities on disk, grouped by (kind, sourceRef file).
+    const existing = new Map<string, Array<{ id: string; yamlPath: string }>>()
+    for (const yamlPath of listEntityYamls(spaceDir)) {
+      let parsed: unknown
+      try {
+        parsed = parseYaml(fs.readFileSync(yamlPath, 'utf8'))
+      } catch {
+        continue
+      }
+      if (!isRecord(parsed)) continue
+      const { kind, id, sourceRef } = parsed
+      if (typeof kind !== 'string' || typeof id !== 'string' || typeof sourceRef !== 'string') {
+        continue
+      }
+      const key = `${kind}|${parseSourceRef(sourceRef).filePath}`
+      existing.set(key, [...(existing.get(key) ?? []), { id, yamlPath }])
+    }
+    for (const p of spacePlans) {
+      const { kind, id, sourceRef } = p.body
+      if (typeof kind !== 'string' || typeof id !== 'string' || typeof sourceRef !== 'string') {
+        continue
+      }
+      if (!RENAME_GUARDED_KINDS.has(kind)) continue
+      if (fs.existsSync(p.filePath)) continue // not NEW — the id already has a home
+      const file = parseSourceRef(sourceRef).filePath
+      const candidates = (existing.get(`${kind}|${file}`) ?? []).filter(
+        (c) => c.id !== id && !incoming.has(`${kind}|${c.id}`),
+      )
+      if (candidates.length !== 1) continue // no match, or ambiguous — leave alone
+      const old = candidates[0]
+      if (!old) continue
+      out.set(
+        p.filePath,
+        `rename? existing ${kind} '${old.id}' (${path.relative(spaceDir, old.yamlPath)}) cites the same sourceRef file '${file}' — rename that yaml's id + every ref to it instead of adding a fork`,
+      )
+    }
+  }
+  return out
+}
+
+/** Component/model/table yamls under `<space>/modules/`, recursively. */
+function listEntityYamls(spaceDir: string): string[] {
+  const out: string[] = []
+  const modulesDir = path.join(spaceDir, 'modules')
+  if (!fs.existsSync(modulesDir)) return out
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(p)
+      } else if (entry.isFile() && entry.name.endsWith('.yaml')) {
+        const parent = path.basename(dir)
+        if (parent === 'components' || parent === 'models' || parent === 'tables') out.push(p)
+      }
+    }
+  }
+  walk(modulesDir)
+  return out
 }

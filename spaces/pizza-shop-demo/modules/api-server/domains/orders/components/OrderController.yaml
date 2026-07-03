@@ -2,7 +2,7 @@ kind: component
 id: OrderController
 name: OrderController
 type: controller
-description: HTTP entry point for checkout and personal order history.
+description: HTTP entry point for checkout and personal order history. Both endpoints require a logged-in customer.
 methods:
   - name: create
     params:
@@ -11,6 +11,9 @@ methods:
     returns: OrderResponse
     httpMethod: POST
     httpPath: /api/orders
+    routeAuth:
+      type: user-jwt
+      header: Authorization
     calls:
       - module:api-server/domain:orders/component:OrderService/method:place
     throws:
@@ -20,5 +23,8 @@ methods:
     returns: List<Order>
     httpMethod: GET
     httpPath: /api/orders
+    routeAuth:
+      type: user-jwt
+      header: Authorization
     calls:
       - module:api-server/domain:orders/component:OrderRepository/method:findByUser

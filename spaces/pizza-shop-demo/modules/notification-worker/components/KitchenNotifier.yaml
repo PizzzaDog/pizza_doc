@@ -1,0 +1,17 @@
+kind: component
+id: KitchenNotifier
+name: KitchenNotifier
+type: consumer
+description: Subscribes to orders.placed and creates a kitchen ticket per order. Duplicate deliveries are dropped by orderId before a ticket is created.
+methods:
+  - name: onOrderPlaced
+    params:
+      - name: event
+        type: OrderPlaced
+    description: Creates the kitchen ticket; a repeat orderId is a no-op.
+subscribes:
+  - event: module:api-server/domain:orders/model:OrderPlaced
+    idempotency:
+      key: orderId
+      strategy: dedupe-store
+      description: Processed orderIds are recorded with the ticket; a redelivered event finds the ticket and stops.

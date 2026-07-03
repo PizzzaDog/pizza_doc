@@ -2,7 +2,7 @@ import type { ValidationCode } from '@pizza-doc/core'
 import type { ParsedArgs } from '../util/args.js'
 import { bold, cyan, dim, red, yellow } from '../util/colors.js'
 
-interface CodeDoc {
+export interface CodeDoc {
   severity: 'error' | 'warning' | 'info'
   pass: string
   summary: string
@@ -11,7 +11,12 @@ interface CodeDoc {
   fix?: string
 }
 
-const DOCS: Record<ValidationCode, CodeDoc> = {
+/**
+ * Exported for `scripts/gen-validation-rules.mjs`, which renders this map
+ * into docs/site …/reference/validation-rules.md — the site page stays
+ * mechanically in sync with `pd lint --explain`.
+ */
+export const DOCS: Record<ValidationCode, CodeDoc> = {
   YAML_PARSE_ERROR: {
     severity: 'error',
     pass: 'parse',
@@ -230,12 +235,15 @@ const DOCS: Record<ValidationCode, CodeDoc> = {
     fix: 'Add a final step ending at: a table (sql), an external-api boundary, or a frontend component (http-response).',
   },
   DTO_FLOW_VIA_TYPE_MISMATCH: {
-    severity: 'error',
+    severity: 'warning',
     pass: 'semantic',
     summary:
-      'A step `via:` ref points at a method whose param/return type does not match the DTO referenced in the step.',
-    causes: ['Renamed a DTO without updating the method signature.'],
-    fix: 'Align the method signature with the DTO type, or fix the via: pointer.',
+      'A step `via:` DTO is neither accepted (param) nor returned by the target: warning for component targets, error when the step names an exact method.',
+    causes: [
+      'Renamed a DTO without updating the method signature.',
+      'Step points via: at the wrong model, or to: at the wrong method.',
+    ],
+    fix: 'Align the method signature with the DTO type, or fix the via:/to: pointers. A returns match counts — via on a GET edge may name the response model.',
   },
   HTTP_STEP_TARGET_NOT_CONTROLLER: {
     severity: 'error',
@@ -774,6 +782,98 @@ const DOCS: Record<ValidationCode, CodeDoc> = {
       'Reverted migration was not removed from the history list.',
     ],
     fix: 'Reconcile `columns:` and `migrations:`. For drop-column: remove the column from columns[]. For add-column: add it. For alter-column: ensure the column exists in columns[]. If the migration was reverted, remove it from the migrations[] list.',
+  },
+  // v0.6 (W1) — type closure + wiring parity
+  TYPE_UNRESOLVED: {
+    severity: 'error',
+    pass: 'semantic',
+    summary:
+      'A method param/return or model field names a type that is neither a primitive nor any model in the space.',
+    causes: [
+      'Typo in the type name (`UserDtoo`).',
+      'Model was renamed or deleted but a signature still names the old type.',
+      'Type exists only in code and was never modeled in the spec.',
+    ],
+    fix: 'Fix the spelling (the message suggests near-matches), add the missing model, or use a primitive. Wrapper names (`List<…>`, `Page<…>`) are not checked — only their type arguments. Exception names from `errorMapping[].exception` count as known types, and `type: external` modules are exempt (their contract is pinned by wireCapture).',
+  },
+  WIRING_STEP_WITHOUT_CALL: {
+    severity: 'warning',
+    pass: 'semantic',
+    summary:
+      'A use-case step walks an edge (http/internal-call/event) that the component wiring never declares.',
+    causes: [
+      'Step was written top-down and the calls:/emits:/subscribes: wiring was never added.',
+      'Wiring was refactored (call removed or moved) but the scenario still walks the old edge.',
+      'Step endpoints point at the wrong components.',
+    ],
+    fix: "For http/internal-call: add a 'calls:' entry on the calling method of the from-component (or 'composes:' for structural containment). For event: declare 'emits:' on the publisher and 'subscribes:' on the receiver against the same event model. Use --strict-wiring in CI to escalate to error.",
+  },
+  WIRING_CALL_WITHOUT_STEP: {
+    severity: 'info',
+    pass: 'semantic',
+    summary: 'A declared call edge is never walked by any use-case step.',
+    causes: [
+      'No scenario models the flow that exercises this call.',
+      'The call is dead wiring left behind by a refactor.',
+    ],
+    fix: 'Add (or extend) a use case whose steps walk the edge, or remove the calls: entry if the dependency is gone.',
+  },
+  STEP_VIA_MISSING: {
+    severity: 'info',
+    pass: 'semantic',
+    summary: 'An http/event step into a concrete component has no payload model (via:).',
+    causes: [
+      'Step was sketched before the DTO / event model existed.',
+      'Author documented the edge but not its contract.',
+    ],
+    fix: "Set 'via:' to the request DTO or event model; response-only edges (GET) may point via: at the response model. Truly payload-less edges: suppress the code on the use case. --strict-wiring escalates to error.",
+  },
+  // v0.6 (W5) — error mapping closure
+  THROWS_UNMAPPED: {
+    severity: 'warning',
+    pass: 'semantic',
+    summary:
+      "A method serving an HTTP route throws an exception that has no row in its module's errorMapping — the wire-level outcome is undeclared.",
+    causes: [
+      'The throw was added to the method signature but the module-level errorMapping was never extended.',
+      'Exception was renamed in the mapping (or the method) but not both.',
+      'The exception is actually handled internally and can never escape.',
+    ],
+    fix: "Add '- exception: <Name>' with an httpStatus (and optionally a machine-readable code) to the module's errorMapping, or drop the throw if it can't escape. Only http-reachable methods (httpMethod set) are checked; `type: external` modules are exempt. --strict-contracts escalates to error.",
+  },
+  // v0.6 (W4) — event delivery contract
+  EVENT_IDEMPOTENCY_MISSING: {
+    severity: 'warning',
+    pass: 'semantic',
+    summary:
+      'A component subscribes to an event that declares delivery: at-least-once, but the subscription declares no idempotency.',
+    causes: [
+      'The delivery guarantee was added to the event model after the subscribers were written.',
+      'The consumer really is not idempotent — the classic double-processing hole.',
+    ],
+    fix: "Add 'idempotency: { key: <event field>, strategy: dedupe-store | upsert | natural }' to the subscribes entry. Events without a declared 'delivery' are not checked — declare the delivery guarantee to arm this rule.",
+  },
+  EVENT_KEY_FIELD_UNKNOWN: {
+    severity: 'error',
+    pass: 'semantic',
+    summary:
+      "An event model's orderingKey (or a subscription's idempotency.key) names a field that does not exist on the event model.",
+    causes: [
+      'Typo in the key name.',
+      'The event field was renamed but the delivery contract still names the old field.',
+    ],
+    fix: 'Fix the key to name an existing field on the event model (the message suggests near-matches), or add the field.',
+  },
+  EVENT_DELIVERY_ON_NON_EVENT: {
+    severity: 'error',
+    pass: 'semantic',
+    summary:
+      "A model declares delivery / orderingKey but its modelKind is not 'event' — delivery contracts only apply to events.",
+    causes: [
+      'The model was demoted from event to dto/entity but kept its transport fields.',
+      'Copy-paste from an event model.',
+    ],
+    fix: "Change modelKind to 'event' (and set topic:), or remove delivery / orderingKey from the model.",
   },
 }
 

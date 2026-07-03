@@ -11,8 +11,13 @@ invariants:
   post:
     - On success, orders has one new row with status='paid' and a non-null stripe_charge_id
     - On success, order_items has one row per line item, each with unit_price_cents snapshotted from pizzas.price_cents at order time
-    - On Stripe decline, no rows are persisted to orders or order_items
+    - On success, exactly one orders.placed event is published after the transaction commits
+    - On Stripe decline, no rows are persisted to orders or order_items and no event is published
 steps:
+  - from: module:web-frontend/component:CartPage
+    to: module:web-frontend/component:CartSummary
+    protocol: internal-call
+    description: Recompute the displayed total from the cart lines before submitting.
   - from: module:web-frontend/component:CartPage
     to: module:web-frontend/component:orderClient
     via: module:api-server/domain:orders/model:CreateOrderRequest
@@ -57,6 +62,12 @@ steps:
     to: module:postgres-db/domain:orders/table:order_items
     protocol: sql
     description: INSERT INTO order_items, one row per line item, inside the same transaction.
+  - from: module:api-server/domain:orders/component:OrderService
+    to: module:notification-worker/component:KitchenNotifier
+    via: module:api-server/domain:orders/model:OrderPlaced
+    protocol: event
+    kind: spawn
+    description: Publish orders.placed after the commit; the kitchen display worker consumes it asynchronously.
 errorFlows:
   - id: stripe-declined
     condition: StripeAPI.createCharge returns success=false

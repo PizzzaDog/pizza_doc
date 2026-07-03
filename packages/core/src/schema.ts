@@ -315,6 +315,31 @@ export const EventEmitSchema = z
   .strict()
 
 /**
+ * How a subscriber stays correct when the same event is delivered more
+ * than once. v0.6 (W4). Expected (warning `EVENT_IDEMPOTENCY_MISSING`)
+ * on every subscription to a `delivery: at-least-once` event — redelivery
+ * without declared idempotency is the classic double-processing hole.
+ */
+export const EventIdempotencySchema = z
+  .object({
+    /**
+     * Event field used as the dedupe key (e.g. `eventId`, `orderId`).
+     * Must name a field on the event model (`EVENT_KEY_FIELD_UNKNOWN`).
+     */
+    key: z.string().min(1),
+    /**
+     * How dedupe is achieved:
+     * - `dedupe-store` — processed keys are recorded; duplicates skipped.
+     * - `upsert`       — handler writes are keyed upserts; replay converges.
+     * - `natural`      — the operation is inherently idempotent
+     *                    (pure overwrite, set-membership add).
+     */
+    strategy: z.enum(['dedupe-store', 'upsert', 'natural']).optional(),
+    description: z.string().optional(),
+  })
+  .strict()
+
+/**
  * A component declares it consumes an event. `via` optionally names the
  * bus / dispatcher component carrying the event (a WebSocket dispatcher,
  * a queue consumer, an in-memory pub/sub registry). The subscriber's
@@ -325,6 +350,12 @@ export const EventSubscribeSchema = z
   .object({
     event: RefSchema,
     via: RefSchema.optional(),
+    /**
+     * How this consumer copes with redelivery. v0.6 (W4). See
+     * EventIdempotencySchema — expected when the event declares
+     * `delivery: at-least-once`.
+     */
+    idempotency: EventIdempotencySchema.optional(),
     description: z.string().optional(),
     sourceRef: SourceRefSchema.optional(),
   })
@@ -636,6 +667,24 @@ export const ModelSchema = z
      * Silently ignored for other model kinds.
      */
     topic: z.string().optional(),
+    /**
+     * For `modelKind: event` — delivery guarantee the transport provides.
+     * v0.6 (W4). `at-least-once` redelivers on failure, so every
+     * subscriber must declare how it survives replay (warning
+     * `EVENT_IDEMPOTENCY_MISSING` otherwise). `exactly-once` — the
+     * transport dedupes. `at-most-once` — fire-and-forget: loss is
+     * preferred over duplicates. Only valid on event models
+     * (`EVENT_DELIVERY_ON_NON_EVENT`).
+     */
+    delivery: z.enum(['at-least-once', 'at-most-once', 'exactly-once']).optional(),
+    /**
+     * For `modelKind: event` — name of the field whose value partitions /
+     * orders delivery (Kafka message key, FIFO group id). Consumers may
+     * assume per-key ordering; cross-key ordering stays undefined. Must
+     * name an existing field (`EVENT_KEY_FIELD_UNKNOWN`); only valid on
+     * event models (`EVENT_DELIVERY_ON_NON_EVENT`).
+     */
+    orderingKey: z.string().optional(),
     /**
      * Optional state machine attached to a field on this model.
      * Typically used when `modelKind: entity` and the model has a
@@ -1820,6 +1869,7 @@ export type RouteAuth = z.infer<typeof RouteAuthSchema>
 export type Route = z.infer<typeof RouteSchema>
 export type EventEmit = z.infer<typeof EventEmitSchema>
 export type EventSubscribe = z.infer<typeof EventSubscribeSchema>
+export type EventIdempotency = z.infer<typeof EventIdempotencySchema>
 export type WireCaptureScenario = z.infer<typeof WireCaptureScenarioSchema>
 export type WireCapture = z.infer<typeof WireCaptureSchema>
 export type TableMigration = z.infer<typeof TableMigrationSchema>

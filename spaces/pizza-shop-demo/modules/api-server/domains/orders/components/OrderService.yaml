@@ -19,3 +19,6 @@ methods:
       - StripeDeclinedException
       - OutOfStockException
     description: For each item, verify the pizza is available and read current price; charge Stripe; persist the order. Rolls back persist if Stripe declines.
+emits:
+  - event: module:api-server/domain:orders/model:OrderPlaced
+    description: Published after the orders/order_items transaction commits — never for declined or out-of-stock attempts.
