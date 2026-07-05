@@ -219,6 +219,156 @@ describe('pd drift --from-jsonl', () => {
     expect(out).toContain('OrderDto')
   })
 
+  // ---------- column attrs + caller idiom (v0.6 — pizza-shop audit) ----------
+
+  /** DB module with an orders table: created_at carries DEFAULT now(). */
+  function writeOrdersTable(): void {
+    fs.mkdirSync(path.join(spaceDir, 'modules', 'db', 'tables'), { recursive: true })
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'db', 'module.yaml'),
+      'kind: module\nid: db\nname: DB\ntype: database\n',
+    )
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'db', 'tables', 'orders.yaml'),
+      [
+        'kind: table',
+        'id: orders',
+        'name: orders',
+        'columns:',
+        '  - name: id',
+        '    sqlType: uuid',
+        '    primaryKey: true',
+        '  - name: created_at',
+        '    sqlType: timestamptz',
+        '    default: now()',
+        '',
+      ].join('\n'),
+    )
+  }
+
+  it('flags a missing column DEFAULT when the code side knows its attrs', async () => {
+    writeOrdersTable()
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'table',
+        id: 'orders',
+        name: 'orders',
+        columns: [
+          { name: 'id', sqlType: 'uuid', nullable: false },
+          // Explicit null = the DDL is KNOWN to have no default.
+          { name: 'created_at', sqlType: 'timestamptz', default: null, nullable: false },
+        ],
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    const out = logs.join('\n')
+    expect(code).toBe(1)
+    expect(out).toContain('created_at default: space=now() code=none')
+  })
+
+  it('stays silent on column attrs the code side does not know', async () => {
+    writeOrdersTable()
+    const file = writeJsonl([
+      matchingUser,
+      {
+        kind: 'table',
+        id: 'orders',
+        name: 'orders',
+        // No default/nullable keys at all — entity-derived extract.
+        columns: [
+          { name: 'id', sqlType: 'uuid' },
+          { name: 'created_at', sqlType: 'timestamptz' },
+        ],
+      },
+    ])
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    expect(code).toBe(0)
+  })
+
+  /** Frontend module with one HTTP-calling component of the given type. */
+  function writeFrontendCaller(type: string): void {
+    fs.mkdirSync(path.join(spaceDir, 'modules', 'web', 'components'), { recursive: true })
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'web', 'module.yaml'),
+      'kind: module\nid: web\nname: Web\ntype: frontend\n',
+    )
+    fs.writeFileSync(
+      path.join(spaceDir, 'modules', 'web', 'components', 'apiClient.yaml'),
+      [
+        'kind: component',
+        'id: apiClient',
+        'name: apiClient',
+        `type: ${type}`,
+        'methods:',
+        '  - name: fetchUsers',
+        '    httpMethod: GET',
+        '    httpPath: /api/users',
+        '',
+      ].join('\n'),
+    )
+  }
+
+  /** Code-side mirror of apiClient so the endpoint index matches too. */
+  const apiClientEntry = {
+    kind: 'component',
+    id: 'apiClient',
+    name: 'apiClient',
+    type: 'client',
+    methods: [{ name: 'fetchUsers', httpMethod: 'GET', httpPath: '/api/users' }],
+  }
+
+  it('accepts an outbound call documented by the client idiom (method-level httpMethod)', async () => {
+    writeFrontendCaller('client')
+    const file = writeJsonl([
+      matchingUser,
+      apiClientEntry,
+      {
+        kind: 'outbound-call',
+        method: 'GET',
+        target_path: '/api/users',
+        _placement: { module: 'web', file: 'src/apiClient.ts', line: 5 },
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    expect(logs.join('\n')).not.toContain('CALL_NOT_IN_SPEC')
+    expect(code).toBe(0)
+  })
+
+  it('still drifts when the same httpMethod sits on a serving-side component', async () => {
+    writeFrontendCaller('service')
+    const file = writeJsonl([
+      matchingUser,
+      apiClientEntry,
+      {
+        kind: 'outbound-call',
+        method: 'GET',
+        target_path: '/api/users',
+        _placement: { module: 'web', file: 'src/apiClient.ts', line: 5 },
+      },
+    ])
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, spaceDir]))
+    spy.mockRestore()
+    expect(logs.join('\n')).toContain('CALL_NOT_IN_SPEC')
+    expect(code).toBe(1)
+  })
+
   it('--json emits the structured diff with the rename pair', async () => {
     writeSpaceOrderDto()
     const file = writeJsonl([

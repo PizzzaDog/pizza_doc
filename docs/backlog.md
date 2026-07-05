@@ -119,6 +119,18 @@ contract dimensions) for review tooling / auto-apply. `sourceRef` is now
 a REQUIRED part of the extractor JSONL contract (skills README + all
 four `pd-extract-*` SKILL.md files say so, with the rename rationale).
 
+Follow-up 2026-07-05 (pizza-shop implementation audit): two gaps the
+audit exposed, both closed. (1) Column diff now compares `default` and
+`nullable`, tri-state on the code side (value = known, `null` =
+known-none, key omitted = unknown → skipped) so entity-derived extracts
+don't false-positive — this catches the real "spec says `DEFAULT
+now()`, generated DDL has none, first INSERT dies" landmine found in
+the audited backend. (2) `computeOutboundCallDrift` accepts the
+apiClient idiom: on client/page/widget components, method-level
+httpMethod/httpPath count as the declared outgoing request, so a legacy
+ref-only `calls:` entry no longer turns a documented client call into
+CALL_NOT_IN_SPEC. JSONL contract updated (skills README + java skill).
+
 ### Phase 4 — honest gates  (done)
 
 `pd validate` prints a scope footer on clean runs ("spec↔code parity NOT

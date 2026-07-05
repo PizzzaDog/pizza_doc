@@ -82,6 +82,13 @@ Every extractor emits lines like:
   spec entity instead of forking it into add+delete — the line suffix
   may drift, the file path must be right. An entity without `sourceRef`
   silently opts out of rename detection and `pd anchors`.
+- Table columns carry **tri-state attrs** for `default` and `nullable`:
+  a string/boolean = the known value, `"default": null` = the DDL is
+  known to have NO default, key omitted = unknown. Emit the known form
+  whenever you read real DDL (migrations, `CREATE TABLE`); omit only
+  when the table is inferred from ORM entities. `pd drift` compares
+  attrs only when the code side knows them — this is what catches the
+  "spec says `DEFAULT now()`, DDL has none, first INSERT dies" class.
 - Placeholder refs like `<FK-TABLE-REF:foo>` are tolerated; the user
   resolves them post-import using `pd validate`'s errors.
 

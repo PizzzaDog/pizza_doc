@@ -280,7 +280,14 @@ interface CodeEntry {
   name?: string
   sourceRef?: string
   fields?: Array<{ name?: string; type?: string }>
-  columns?: Array<{ name?: string; sqlType?: string }>
+  /**
+   * Column attrs are tri-state (v0.6 — pizza-shop audit follow-up):
+   * `default`: string = this DDL default, null = explicitly NO default,
+   * key missing = unknown (table inferred from ORM entities, not DDL).
+   * Same for `nullable`. Unknown attrs are skipped by the diff, so
+   * entity-derived extracts don't false-positive every column.
+   */
+  columns?: Array<{ name?: string; sqlType?: string; default?: string | null; nullable?: boolean }>
   methods?: Array<{
     name?: string
     httpMethod?: string
@@ -314,9 +321,16 @@ interface Inventory {
   models: Map<string, ModelShape>
   endpoints: Map<string, EndpointShape>
 }
+interface ColumnShape {
+  sqlType: string
+  /** string = default expr, null = known-none, undefined = unknown. */
+  default?: string | null
+  /** undefined = unknown (code side only; the spec is always concrete). */
+  nullable?: boolean
+}
 interface TableShape {
   id: string
-  columns: Map<string, string> // name → sqlType
+  columns: Map<string, ColumnShape>
   /** Declaration file — the rename-pairing key (line suffix ignored). */
   sourceRef?: string
 }
@@ -356,8 +370,14 @@ function indexCode(entries: CodeEntry[]): Inventory {
   const endpoints = new Map<string, EndpointShape>()
   for (const e of entries) {
     if (e.kind === 'table' && e.id) {
-      const cols = new Map<string, string>()
-      for (const c of e.columns ?? []) if (c.name) cols.set(c.name, c.sqlType ?? '')
+      const cols = new Map<string, ColumnShape>()
+      for (const c of e.columns ?? []) {
+        if (!c.name) continue
+        const col: ColumnShape = { sqlType: c.sqlType ?? '' }
+        if ('default' in c) col.default = c.default ?? null
+        if (typeof c.nullable === 'boolean') col.nullable = c.nullable
+        cols.set(c.name, col)
+      }
       const shape: TableShape = { id: e.id, columns: cols }
       if (typeof e.sourceRef === 'string') shape.sourceRef = e.sourceRef
       tables.set(e.id, shape)
@@ -382,8 +402,12 @@ function indexCode(entries: CodeEntry[]): Inventory {
 }
 
 function tableShape(t: Table): TableShape {
-  const cols = new Map<string, string>()
-  for (const c of t.columns) cols.set(c.name, c.sqlType)
+  const cols = new Map<string, ColumnShape>()
+  for (const c of t.columns) {
+    // Spec side is the contract: an absent `default` MEANS none, and
+    // `nullable` is always concrete (the schema defaults it to false).
+    cols.set(c.name, { sqlType: c.sqlType, default: c.default ?? null, nullable: c.nullable })
+  }
   const shape: TableShape = { id: t.id, columns: cols }
   if (t.sourceRef) shape.sourceRef = t.sourceRef
   return shape
@@ -524,28 +548,74 @@ function computeFieldDiffs(
   }
   return out
 }
+interface ColumnAttrDiff {
+  name: string
+  attr: 'default' | 'nullable'
+  space: string
+  code: string
+}
+interface ColumnDiff extends FieldDiff {
+  attrChanged: ColumnAttrDiff[]
+}
+
 function computeColumnDiffs(
   spaceTables: Map<string, TableShape>,
   codeTables: Map<string, TableShape>,
-): FieldDiff[] {
-  const out: FieldDiff[] = []
+): ColumnDiff[] {
+  const out: ColumnDiff[] = []
   for (const [id, codeT] of codeTables) {
     const spaceT = spaceTables.get(id)
     if (!spaceT) continue
     const addedInCode = [...codeT.columns.keys()].filter((k) => !spaceT.columns.has(k))
     const removedInCode = [...spaceT.columns.keys()].filter((k) => !codeT.columns.has(k))
     const typeChanged: FieldDiff['typeChanged'] = []
-    for (const [name, type] of spaceT.columns) {
-      const codeType = codeT.columns.get(name)
-      if (codeType !== undefined && codeType !== type) {
-        typeChanged.push({ name, space: type, code: codeType })
+    const attrChanged: ColumnAttrDiff[] = []
+    for (const [name, spaceCol] of spaceT.columns) {
+      const codeCol = codeT.columns.get(name)
+      if (!codeCol) continue
+      if (codeCol.sqlType !== spaceCol.sqlType) {
+        typeChanged.push({ name, space: spaceCol.sqlType, code: codeCol.sqlType })
+      }
+      // v0.6 — the created_at class (pizza-shop audit): spec declares
+      // DEFAULT now(), code DDL has none, and the first INSERT that omits
+      // the column dies at runtime. Attrs are compared only when the code
+      // side KNOWS them (tri-state in CodeEntry.columns) — an
+      // entity-derived table reports nothing and stays silent here.
+      if (
+        codeCol.default !== undefined &&
+        !sqlDefaultEq(spaceCol.default ?? null, codeCol.default)
+      ) {
+        attrChanged.push({
+          name,
+          attr: 'default',
+          space: spaceCol.default ?? 'none',
+          code: codeCol.default ?? 'none',
+        })
+      }
+      if (
+        codeCol.nullable !== undefined &&
+        spaceCol.nullable !== undefined &&
+        codeCol.nullable !== spaceCol.nullable
+      ) {
+        attrChanged.push({
+          name,
+          attr: 'nullable',
+          space: String(spaceCol.nullable),
+          code: String(codeCol.nullable),
+        })
       }
     }
-    if (addedInCode.length || removedInCode.length || typeChanged.length) {
-      out.push({ ownerId: id, addedInCode, removedInCode, typeChanged })
+    if (addedInCode.length || removedInCode.length || typeChanged.length || attrChanged.length) {
+      out.push({ ownerId: id, addedInCode, removedInCode, typeChanged, attrChanged })
     }
   }
   return out
+}
+
+/** Case-insensitive, whitespace-trimmed SQL default comparison. */
+function sqlDefaultEq(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
 function fmtFieldDiff(d: FieldDiff): string {
@@ -555,11 +625,14 @@ function fmtFieldDiff(d: FieldDiff): string {
   for (const t of d.typeChanged) lines.push(`  ~ ${t.name}: space=${t.space} code=${t.code}`)
   return lines.join('\n    ')
 }
-function fmtColumnDiff(d: FieldDiff): string {
+function fmtColumnDiff(d: ColumnDiff): string {
   const lines = [`table '${d.ownerId}':`]
   for (const f of d.addedInCode) lines.push(`  + added in code: ${f}`)
   for (const f of d.removedInCode) lines.push(`  - removed in code: ${f}`)
   for (const t of d.typeChanged) lines.push(`  ~ ${t.name}: space=${t.space} code=${t.code}`)
+  for (const a of d.attrChanged) {
+    lines.push(`  ~ ${a.name} ${a.attr}: space=${a.space} code=${a.code}`)
+  }
   return lines.join('\n    ')
 }
 
@@ -847,11 +920,20 @@ export function computeRouteDrift(space: Space, entries: CodeEntry[]): RouteDrif
 }
 
 /**
+ * Component types whose method-level httpMethod/httpPath describe the
+ * OUTGOING request they make, not a route they serve — mirrors
+ * HTTP_CALLER_SIDE_TYPES in the semantic validator (W5).
+ */
+const CALLER_SIDE_TYPES: ReadonlySet<string> = new Set(['client', 'page', 'widget'])
+
+/**
  * For each `{ kind: 'outbound-call' }`, check whether any caller method's
  * `calls[]` declares the target_path/method pair. Object-form (v0.3 — A1)
  * `{target, path, method}` calls match exactly; legacy ref-only calls
- * cannot match a path so they are skipped. Header drift is emitted when
- * the code attaches a header the spec doesn't list (or vice versa).
+ * cannot match a path — but on client/page/widget components the
+ * method's own httpMethod/httpPath count as the declared outgoing
+ * request (see CALLER_SIDE_TYPES). Header drift is emitted when the
+ * code attaches a header the spec doesn't list (or vice versa).
  */
 export function computeOutboundCallDrift(space: Space, entries: CodeEntry[]): OutboundCallDrift[] {
   // Index declared calls per module: `${MODULE}|${METHOD} ${PATH}` →
@@ -867,6 +949,17 @@ export function computeOutboundCallDrift(space: Space, entries: CodeEntry[]): Ou
             const entry: { header?: string } = {}
             if (call.credential?.header) entry.header = call.credential.header
             moduleCalls.set(key, entry)
+          }
+          // v0.6 (pizza-shop audit follow-up) — the apiClient idiom: on
+          // client/page/widget components, method-level httpMethod/httpPath
+          // document the OUTGOING request (the same convention
+          // THROWS_UNMAPPED exempts). Index them so a legacy ref-only
+          // `calls:` entry doesn't turn a perfectly documented client call
+          // into CALL_NOT_IN_SPEC. Object-form entries win on collision —
+          // they carry the credential.
+          if (CALLER_SIDE_TYPES.has(c.type) && meth.httpMethod && meth.httpPath) {
+            const key = `${m.id}|${meth.httpMethod.toUpperCase()} ${meth.httpPath}`
+            if (!moduleCalls.has(key)) moduleCalls.set(key, {})
           }
         }
       }

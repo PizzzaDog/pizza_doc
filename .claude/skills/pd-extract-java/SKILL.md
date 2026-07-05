@@ -90,6 +90,12 @@ line per each.
 - `@OneToMany`, `@ManyToMany`, `@Transient` → `persisted: false`.
 - Defaults from `= …` initializers aren't columns' DEFAULT — they're
   Java-side; don't propagate to `Column.default`.
+- Column `default` / `nullable` in the JSONL are tri-state (see skills
+  README): value = known, `"default": null` = known-none, omitted =
+  unknown. When you read Flyway/Liquibase DDL you KNOW both — emit them
+  (`DEFAULT now()` present or explicitly `null`). When the table is
+  inferred from a JPA entity without `@ColumnDefault`, the generated DDL
+  has no default — that's a known `null`, not an unknown.
 
 **DTO fields** (record params or simple classes):
 - Each parameter = one field.
