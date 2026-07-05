@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-05
+
+### Added — doc-first hard wiring: design → validate → handoff → implement → drift
+
+The whole W1–W8 roadmap ("spec → cheap implementer", see
+`docs/backlog.md`) plus code-anchoring Phases 3–4. The loop is now
+closed in both directions: a use case that passes the gate carries
+everything an implementing agent needs, and the code it produces can
+be diffed back against the spec deterministically.
+
+- **Type closure + wiring parity (W1).** `TYPE_UNRESOLVED` (error):
+  every non-primitive leaf type in params/returns/fields must resolve
+  to a model. `WIRING_STEP_WITHOUT_CALL` / `WIRING_CALL_WITHOUT_STEP` /
+  `STEP_VIA_MISSING`: use-case steps and declared `calls`/`emits` edges
+  are two views of ONE graph and must agree; `--strict-wiring`
+  escalates.
+- **Self-contained implementation brief (W2–W3).**
+  `pd export implementation-brief <usecase>` renders full method
+  contracts, transitive model closure, tables, scoped config, wire
+  captures, and inlined ADR bodies; exits 1 on phantom types.
+  `packages/core/src/export.ts` is now the single renderer behind both
+  the brief and the full-fidelity `pd export ai`.
+- **Event delivery contract (W4).** On event models: `delivery`
+  (at-least-once / at-most-once / exactly-once) + `orderingKey`; on
+  `subscribes[]`: `idempotency { key, strategy }`. Rules:
+  `EVENT_IDEMPOTENCY_MISSING`, `EVENT_KEY_FIELD_UNKNOWN`,
+  `EVENT_DELIVERY_ON_NON_EVENT`. All fields optional/additive.
+- **Error-mapping closure (W5).** `THROWS_UNMAPPED`: every `throws` on
+  an HTTP-serving method needs a module `errorMapping` row
+  (client/page/widget and external modules exempt);
+  `--strict-contracts` escalates.
+- **`pd handoff <usecase> [--json]` (W6).** The binary implementer
+  gate: 0 errors + brief type closure + step↔call parity + payload
+  models + error mapping + event idempotency, scoped to the use case.
+  Exit 0 ⇒ hand the brief to the implementer.
+- **Rename-safe drift + machine diff (code-anchoring Phase 3).**
+  `pd drift` pairs unmatched tables/models by `sourceRef` file and
+  reports RENAME instead of add+delete; field drift computed across
+  the pair; `pd drift --json` emits the full structured diff;
+  `pd import` refuses to fork a detected rename. `sourceRef` is now a
+  required part of the extractor JSONL contract.
+- **Column attribute drift.** Column diff compares `default` and
+  `nullable` (tri-state on the code side, unknown attrs skipped) —
+  catches the "spec says `DEFAULT now()`, generated DDL has none,
+  first INSERT dies" class found in the first real implementation
+  audit. Outbound-call drift now understands the apiClient idiom
+  (method-level httpMethod/httpPath on client/page/widget = the
+  documented outgoing request).
+- **Honest gates (Phase 4).** Clean `pd validate` prints "spec↔code
+  parity NOT checked — run `pd anchors` / `pd drift`"; the
+  `pd doctor --fix-ci` template scaffolds a live `pd anchors` step.
+
+### Changed
+
+- `pizza-shop-demo` now exercises every rail and validates
+  **0 errors / 0 warnings / 0 infos** under ALL strict flags: 8-row
+  errorMapping, `OrderPlaced` at-least-once event → idempotent
+  `notification-worker`, user-jwt credentials + routeAuth, Order state
+  machine with scenarios, config-map, external-deps, wire capture,
+  ADR-001, three runbooks covering every errorFlow. All 7 use cases
+  pass `pd handoff`.
+- Site reference docs stopped lagging by construction:
+  `validation-rules.md` (80 codes) and the new `cli.md` are GENERATED
+  (`pnpm gen:rules-doc` from the `pd lint --explain` knowledge base;
+  `pnpm gen:cli-doc` from `pd --help`); `yaml-format.md` rewritten
+  against the v0.6 schema.
+
+### Notes
+
+Tests: 448 across core/cli/web/mcp. Demo verified end to end: all
+`pd handoff` gates green, `pd export ai` and the place-order brief
+carry every new surface, and a first agent-built implementation
+(browse-menu slice) was audited against the spec with the new drift
+rails — which is where the column-attr gap was found and closed.
+
 ## [0.5.1] — 2026-05-18
 
 ### Fixed — version source-of-truth + INSTALL TODO

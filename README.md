@@ -72,10 +72,12 @@ pizza-doc/
 
 ## Status
 
-**v0.5.1** <!-- pd:version --> — five minor releases past the initial public
-drop. The CLI now covers scaffolding, validation, change-sets, drift, export
-(OpenAPI / TS / Go / implementation-brief / operations), a doctor checklist,
-a production-readiness gate, and an MCP server (`pd-mcp`) for AI agents. The
+**v0.6.0** <!-- pd:version --> — six minor releases past the initial public
+drop. The CLI now covers scaffolding, validation, change-sets, drift (rename-
+safe, `--json`), export (OpenAPI / TS / Go / implementation-brief /
+operations), a per-use-case handoff gate (`pd handoff`), deterministic
+spec↔code anchors, a doctor checklist, a production-readiness gate, and an
+MCP server (`pd-mcp`) for AI agents. The
 web UI ships viewer + scalar editing against the same files. Full per-release
 history lives in [`CHANGELOG.md`](./CHANGELOG.md); ongoing work in
 [`docs/backlog.md`](./docs/backlog.md).

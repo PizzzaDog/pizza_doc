@@ -1,6 +1,6 @@
 {
   "name": "pizza-doc",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "description": "File-based architecture-as-code framework",
   "license": "MIT",
@@ -36,11 +36,7 @@
     "zod-to-json-schema": "3.23.5"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "@biomejs/biome",
-      "esbuild",
-      "sharp"
-    ],
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild", "sharp"],
     "overrides": {
       "zod-to-json-schema": "3.23.5",
       "@astrojs/sitemap": "3.2.1"

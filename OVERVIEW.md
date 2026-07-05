@@ -1,4 +1,4 @@
-# Pizza Doc — Full Project Overview (v0.5.1) <!-- pd:version -->
+# Pizza Doc — Full Project Overview (v0.6.0) <!-- pd:version -->
 
 A file-based architecture-as-code tool that lets you describe a system
 fully — actors, modules, components, models, tables, use cases, state
