@@ -72,8 +72,8 @@ pizza-doc/
 
 ## Status
 
-**v0.6.0** <!-- pd:version --> — six minor releases past the initial public
-drop. The CLI now covers scaffolding, validation, change-sets, drift (rename-
+**v0.6.0** <!-- pd:version --> — several minor releases past the initial
+public drop. The CLI now covers scaffolding, validation, change-sets, drift (rename-
 safe, `--json`), export (OpenAPI / TS / Go / implementation-brief /
 operations), a per-use-case handoff gate (`pd handoff`), deterministic
 spec↔code anchors, a doctor checklist, a production-readiness gate, and an
