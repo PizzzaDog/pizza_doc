@@ -1,0 +1,16 @@
+# WS gateway on a non-controller inbound type: must still count as a
+# declared endpoint (INBOUND_HTTP_COMPONENT_TYPES widening).
+kind: component
+id: EventsFeed
+name: EventsFeed
+type: subscriber
+methods:
+  - name: EventsSocket
+    httpMethod: GET
+    httpPath: /ws/events
+  - name: LegacyProbe
+    httpMethod: GET
+    httpPath: /internal/legacy-probe
+    readiness:
+      orphan:
+        reason: Legacy operator probe is intentionally outside product use cases.

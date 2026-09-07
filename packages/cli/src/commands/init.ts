@@ -215,7 +215,7 @@ Read the skill descriptions to find the right one for the task.
 pd validate           # schema + refs + semantic check
 pd coverage           # how complete the spec is
 pd orphans            # unused entities
-pd endpoints          # HTTP surface from controllers
+pd endpoints [--module <id>]  # inbound HTTP/SSE/WS surface
 pd dataflow <Field>   # trace one field across the system
 pd export openapi     # OpenAPI 3.1 JSON from controllers
 pd --help             # full surface

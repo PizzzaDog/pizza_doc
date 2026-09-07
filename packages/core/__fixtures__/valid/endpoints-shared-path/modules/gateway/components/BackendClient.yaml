@@ -1,0 +1,10 @@
+# apiClient idiom: http metadata on a `client` component documents the
+# outbound request it MAKES — it must never appear as an endpoint owner.
+kind: component
+id: BackendClient
+name: BackendClient
+type: client
+methods:
+  - name: FetchFriends
+    httpMethod: GET
+    httpPath: /api/friends

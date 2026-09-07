@@ -87,7 +87,7 @@ quality gates:
                                   opt-in anchor gate: every sourceRef resolves to a real file
   coverage      [<dir>] [--min-components 80] ...
   orphans       [<dir>] [--kind components|models|tables|endpoints]
-  endpoints     [<dir>] [--orphans]
+  endpoints     [<dir>] [--orphans] [--module <id>]
   dataflow      <Model.field> [<dir>]
   diff          <git-ref> [<dir>]
   diff          --change <id> [<dir>]

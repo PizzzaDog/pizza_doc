@@ -102,7 +102,7 @@ pd import --from-jsonl <file>           # bulk import from any extractor
 pd validate                             # auto-detects .pizza-doc or spaces/<id>
 pd coverage                             # ditto
 pd orphans   [--kind ...]
-pd endpoints [--orphans]
+pd endpoints [--orphans] [--module <id>]
 pd dataflow  <Model.field>
 pd diff      <git-ref>
 ```

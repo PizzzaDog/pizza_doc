@@ -30,6 +30,7 @@ import { parse as parseYamlValue } from 'yaml'
 import { closestMatches } from '../levenshtein.js'
 import type { LoadedFile } from '../loader.js'
 import type { RefIndex } from '../ref.js'
+import { INBOUND_HTTP_COMPONENT_TYPES } from '../schema.js'
 import type {
   Column,
   Component,
@@ -750,8 +751,8 @@ export function ruleHttpStepTargetController(space: Space, index: RefIndex): Val
   // receiver (`consumer`/`subscriber`) for webhooks / SSE clients / queue
   // consumers / MCP listeners, or a `middleware` (auth filter, rate limiter,
   // tracing wrapper, CORS interceptor — sits between wire and controller
-  // and can short-circuit).
-  const pushReceiverTypes = new Set(['controller', 'consumer', 'subscriber', 'middleware'])
+  // and can short-circuit). The set lives in schema.ts so the endpoint
+  // rollups (readiness, CLI usage index) stay in lockstep with this rule.
   for (const uc of space.useCases) {
     for (const { step, scope } of walkAllSteps(uc)) {
       if (
@@ -762,7 +763,7 @@ export function ruleHttpStepTargetController(space: Space, index: RefIndex): Val
       ) {
         const toTarget = index.get(step.to)
         if (!toTarget || toTarget.kind !== 'component') continue
-        if (pushReceiverTypes.has(toTarget.entity.type)) continue
+        if (INBOUND_HTTP_COMPONENT_TYPES.has(toTarget.entity.type)) continue
         issues.push({
           severity: 'error',
           code: 'HTTP_STEP_TARGET_NOT_CONTROLLER',

@@ -165,7 +165,7 @@ ${bold('quality gates:')}
                                   opt-in anchor gate: every sourceRef resolves to a real file
   ${cyan('coverage')}      [<dir>] [--min-components 80] ...
   ${cyan('orphans')}       [<dir>] [--kind components|models|tables|endpoints]
-  ${cyan('endpoints')}     [<dir>] [--orphans]
+  ${cyan('endpoints')}     [<dir>] [--orphans] [--module <id>]
   ${cyan('dataflow')}      <Model.field> [<dir>]
   ${cyan('diff')}          <git-ref> [<dir>]
   ${cyan('diff')}          --change <id> [<dir>]

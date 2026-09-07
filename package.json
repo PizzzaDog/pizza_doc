@@ -22,7 +22,7 @@
     "pd": "node packages/cli/dist/index.js",
     "detect-slop": "impeccable detect packages/web/src/",
     "changeset": "changeset",
-    "version-packages": "changeset version",
+    "version-packages": "changeset version && node scripts/sync-versions.mjs",
     "gen:rules-doc": "pnpm --filter @pizza-doc/cli build && node scripts/gen-validation-rules.mjs",
     "gen:cli-doc": "pnpm --filter @pizza-doc/cli build && node scripts/gen-cli-doc.mjs"
   },

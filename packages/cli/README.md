@@ -60,7 +60,7 @@ pnpm pd readiness [<dir>] [--profile production] [--min-endpoints 100] [--min-mo
 pnpm pd readiness [<dir>] [--profile production] [--drift-from-jsonl <code-extract.jsonl>]
 pnpm pd coverage [<dir>] [--min-components 80]
 pnpm pd orphans [<dir>] [--kind components|models|tables|endpoints]
-pnpm pd endpoints [<dir>] [--orphans]
+pnpm pd endpoints [<dir>] [--orphans] [--module <id>]
 pnpm pd dataflow <Model.field> [<dir>]
 pnpm pd diff <git-ref> [<dir>]
 pnpm pd drift --from-jsonl <code-extract.jsonl> [<dir>]
@@ -74,6 +74,10 @@ Use `readiness --profile production` as the releasable-spec gate in CI. It
 fails on uncovered or orphaned surfaces, missing deploy-time proof for
 `file`/`device`/`exec` dependencies, unproven error mappings, and optional
 code/spec drift when `--drift-from-jsonl` is provided.
+
+`endpoints` inventories inbound-serving controller, consumer, subscriber,
+and middleware methods. Shared verb+path pairs retain every module owner;
+use `--module <id>` to narrow the report to one module.
 
 Export:
 

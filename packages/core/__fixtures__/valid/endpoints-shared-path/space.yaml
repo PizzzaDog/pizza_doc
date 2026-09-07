@@ -1,0 +1,5 @@
+meta:
+  id: endpoints-shared-path
+  name: Shared verb+path across modules
+  version: 0.1.0
+  pizzaDocVersion: 0.3.0

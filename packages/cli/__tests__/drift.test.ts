@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cmdDrift } from '../src/commands/drift.js'
 import { parseArgs } from '../src/util/args.js'
@@ -398,5 +399,163 @@ describe('pd drift --from-jsonl', () => {
     ])
     expect(report.models.codeOnly).toEqual([])
     expect(report.models.spaceOnly).toEqual([])
+  })
+})
+
+/**
+ * v0.7 — shared inbound owners. A verb+path served by two modules (proxy in
+ * front of a backend) is compared per owner module: a snapshot that mirrors
+ * both owners is in sync, dropping one owner drifts only that owner, and a
+ * caller-side component's http metadata never counts on either side.
+ */
+describe('pd drift — endpoints with several owners per verb+path', () => {
+  const FIXTURE = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../core/__fixtures__/valid/endpoints-shared-path',
+  )
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-drift-shared-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function writeJsonl(lines: unknown[]): string {
+    const file = path.join(tmp, 'code.jsonl')
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'))
+    return file
+  }
+
+  const coreApi = {
+    _placement: { spaceId: 'endpoints-shared-path', module: 'backend' },
+    kind: 'component',
+    id: 'CoreApi',
+    name: 'CoreApi',
+    type: 'controller',
+    methods: [
+      { name: 'Healthz', httpMethod: 'GET', httpPath: '/api/healthz' },
+      { name: 'ListFriends', httpMethod: 'GET', httpPath: '/api/friends' },
+      { name: 'CreateOrder', httpMethod: 'POST', httpPath: '/api/orders' },
+    ],
+  }
+  const eventsFeed = {
+    _placement: { spaceId: 'endpoints-shared-path', module: 'backend' },
+    kind: 'component',
+    id: 'EventsFeed',
+    name: 'EventsFeed',
+    type: 'subscriber',
+    methods: [
+      { name: 'EventsSocket', httpMethod: 'GET', httpPath: '/ws/events' },
+      { name: 'LegacyProbe', httpMethod: 'GET', httpPath: '/internal/legacy-probe' },
+    ],
+  }
+  const proxyApi = {
+    _placement: { spaceId: 'endpoints-shared-path', module: 'gateway' },
+    kind: 'component',
+    id: 'ProxyApi',
+    name: 'ProxyApi',
+    type: 'controller',
+    methods: [
+      { name: 'GetHealthz', httpMethod: 'GET', httpPath: '/api/healthz' },
+      { name: 'FriendsList', httpMethod: 'GET', httpPath: '/api/friends' },
+      { name: 'LegacyProbe', httpMethod: 'GET', httpPath: '/internal/legacy-probe' },
+    ],
+  }
+  const backendClient = {
+    _placement: { spaceId: 'endpoints-shared-path', module: 'gateway' },
+    kind: 'component',
+    id: 'BackendClient',
+    name: 'BackendClient',
+    type: 'client',
+    methods: [{ name: 'FetchFriends', httpMethod: 'GET', httpPath: '/api/friends' }],
+  }
+
+  async function driftJson(file: string): Promise<{
+    verdict: string
+    endpoints: {
+      codeOnly: Array<{ key: string; module?: string }>
+      spaceOnly: Array<{ key: string; module?: string }>
+    }
+  }> {
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    await cmdDrift(parseArgs(['--from-jsonl', file, FIXTURE, '--json']))
+    spy.mockRestore()
+    return JSON.parse(logs.join('\n'))
+  }
+
+  it('reports no drift when the snapshot mirrors both owners of a shared key', async () => {
+    const file = writeJsonl([coreApi, eventsFeed, proxyApi, backendClient])
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, FIXTURE]))
+    spy.mockRestore()
+    expect(code).toBe(0)
+    const report = await driftJson(file)
+    expect(report.verdict).toBe('in-sync')
+    expect(report.endpoints).toEqual({ codeOnly: [], spaceOnly: [] })
+  })
+
+  it('reports only the owner that is missing from the code, not the shadowed one', async () => {
+    const proxyWithoutHealthz = {
+      ...proxyApi,
+      methods: proxyApi.methods.filter((m) => m.name !== 'GetHealthz'),
+    }
+    const file = writeJsonl([coreApi, eventsFeed, proxyWithoutHealthz, backendClient])
+    const report = await driftJson(file)
+    expect(report.endpoints.codeOnly).toEqual([])
+    expect(report.endpoints.spaceOnly).toEqual([{ key: 'GET /api/healthz', module: 'gateway' }])
+
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      logs.push(args.join(' '))
+    })
+    const code = await cmdDrift(parseArgs(['--from-jsonl', file, FIXTURE]))
+    spy.mockRestore()
+    expect(code).toBe(1)
+    expect(logs.join('\n')).toContain('endpoint: GET /api/healthz  (module:gateway)')
+    expect(logs.join('\n')).not.toContain('(module:backend)')
+  })
+
+  it('reports a new owner in the code as code-only even when another module already serves the key', async () => {
+    const proxyWithOrders = {
+      ...proxyApi,
+      methods: [
+        ...proxyApi.methods,
+        { name: 'Orders', httpMethod: 'POST', httpPath: '/api/orders' },
+      ],
+    }
+    const file = writeJsonl([coreApi, eventsFeed, proxyWithOrders, backendClient])
+    const report = await driftJson(file)
+    expect(report.verdict).toBe('significant')
+    expect(report.endpoints.codeOnly).toEqual([{ key: 'POST /api/orders', module: 'gateway' }])
+    expect(report.endpoints.spaceOnly).toEqual([])
+  })
+
+  it('ignores http metadata on caller-side components (apiClient idiom) on the code side', async () => {
+    const clientAsOwner = {
+      ...backendClient,
+      methods: [{ name: 'Probe', httpMethod: 'GET', httpPath: '/api/from-client-only' }],
+    }
+    const file = writeJsonl([coreApi, eventsFeed, proxyApi, clientAsOwner])
+    const report = await driftJson(file)
+    expect(report.endpoints).toEqual({ codeOnly: [], spaceOnly: [] })
+  })
+
+  it('lets a module-less code owner (legacy JSONL without _placement) satisfy every space owner of the key', async () => {
+    const legacy = {
+      kind: 'component',
+      id: 'Anything',
+      type: 'controller',
+      methods: coreApi.methods,
+    }
+    const file = writeJsonl([legacy, eventsFeed, proxyApi])
+    const report = await driftJson(file)
+    // GET /api/healthz + GET /api/friends have a module-less owner → both
+    // backend and gateway declarations are satisfied; POST /api/orders too.
+    expect(report.endpoints).toEqual({ codeOnly: [], spaceOnly: [] })
   })
 })

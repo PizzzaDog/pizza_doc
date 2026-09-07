@@ -1,0 +1,13 @@
+# No verb+path in the step description on purpose: coverage must come from
+# the fallback owner match (step.to === an owner of the key), which the old
+# last-wins map lost whenever another module's declaration shadowed this one.
+kind: usecase
+id: list-friends
+name: List friends straight from the backend
+actor: actor:visitor
+trigger: Desktop app refreshes the friends list
+steps:
+  - from: actor:visitor
+    to: module:backend/component:CoreApi
+    protocol: http
+    description: Friends list request (path resolved by the caller).

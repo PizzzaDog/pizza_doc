@@ -59,7 +59,7 @@ Each step is an edge: from one component to another, with a **protocol**.
 | Protocol | Meaning | What the validator checks |
 | --- | --- | --- |
 | `internal-call` | Direct function call inside a process | Nothing special |
-| `http` | HTTP request crossing a module boundary | Target must be a `controller` component |
+| `http` | HTTP request crossing a module boundary | Target must be an inbound component: `controller`, `consumer`, `subscriber`, or `middleware` |
 | `sql` | Database operation | Target must be a `table` |
 | `event` | Pub/sub or queue | No target restriction |
 | `external-api` | Call to a module with `type: external` | Target must be in an external module |

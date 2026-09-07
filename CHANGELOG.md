@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — shared inbound endpoint owners
+
+- **Every owner of a verb+path is kept.** The endpoint index is now
+  `METHOD /path → owners[]` instead of last-loaded-wins, so a proxy module
+  re-serving a backend route no longer shadows it in `pd endpoints`,
+  `orphans`, readiness and use-case coverage. A shared key stays
+  enforceable while any owner lacks a `readiness.orphan` reason.
+- **`INBOUND_HTTP_COMPONENT_TYPES`** (`controller`, `consumer`,
+  `subscriber`, `middleware`), exported from core, is the single source of
+  truth for "which component types own an inbound endpoint" — shared by
+  `HTTP_STEP_TARGET_NOT_CONTROLLER`, the readiness rollup, the CLI usage
+  index and `pd drift`. `client` / `page` / `widget` http metadata is the
+  apiClient idiom and never counts.
+- **`pd endpoints --module <id>`** narrows the report to one module's owners.
+- **`pd drift`** compares endpoints per (verb+path, owner module): a route
+  served by two modules never reports false drift for the shadowed one,
+  and a genuinely missing owner is still reported. `--json` endpoint
+  entries are now `{ key, module }` objects instead of bare `METHOD /path`
+  strings.
+- **Release tooling.** `pnpm version-packages` (the Release PR's version
+  step) now also syncs the workspace root, `@pizza-doc/web` and the docs
+  site manifests to the published version and re-formats the manifests
+  `changeset version` rewrites, so `pnpm check` stays green on the
+  Release PR.
+
 ## [0.6.0] — 2026-07-05
 
 ### Added — doc-first hard wiring: design → validate → handoff → implement → drift

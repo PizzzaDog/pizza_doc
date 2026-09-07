@@ -1,0 +1,19 @@
+# Local proxy re-serving backend routes under the same verb+path — the
+# endpoints rollup must list BOTH owners, not last-loaded-wins.
+kind: component
+id: ProxyApi
+name: ProxyApi
+type: controller
+methods:
+  - name: GetHealthz
+    httpMethod: GET
+    httpPath: /api/healthz
+  - name: FriendsList
+    httpMethod: GET
+    httpPath: /api/friends
+  - name: LegacyProbe
+    httpMethod: GET
+    httpPath: /internal/legacy-probe
+    readiness:
+      orphan:
+        reason: Legacy operator probe is intentionally outside product use cases.

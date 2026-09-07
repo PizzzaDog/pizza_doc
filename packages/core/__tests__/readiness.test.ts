@@ -41,6 +41,25 @@ describe('production readiness profile', () => {
     expect(codes(result)).toContain('READINESS_ORPHAN_ENDPOINT')
   })
 
+  it('covers a verb+path shared across modules via any of its owners', async () => {
+    const result = await readiness('valid', 'endpoints-shared-path')
+
+    // backend and gateway both declare GET /api/healthz and GET /api/friends;
+    // the use cases cover them through one owner each (desc match on the
+    // proxy, fallback owner match on the backend). Under the old last-wins
+    // endpoint map the shadowed owner produced a false READINESS_ORPHAN_ENDPOINT.
+    // The only uncovered endpoint without an explicit readiness waiver is the
+    // subscriber-type WS gateway (which also proves non-controller inbound
+    // types are rolled up). The shared legacy probe stays CLI-visible but both
+    // owners carry an explicit readiness.orphan reason.
+    const orphanEndpoints = result.issues.filter((i) => i.code === 'READINESS_ORPHAN_ENDPOINT')
+    expect(orphanEndpoints).toHaveLength(1)
+    expect(orphanEndpoints[0]?.message).toContain('GET /ws/events')
+    expect(orphanEndpoints[0]?.entityRef).toBe(
+      'module:backend/component:EventsFeed/method:EventsSocket',
+    )
+  })
+
   it('fails a file/device/exec dependency without preflight or drift proof', async () => {
     const result = await readiness('invalid', 'READINESS_EXTERNAL_DEP_PROOF_MISSING')
 

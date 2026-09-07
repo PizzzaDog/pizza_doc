@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Component, Model, Space, Table } from '@pizza-doc/core'
+import { INBOUND_HTTP_COMPONENT_TYPES } from '@pizza-doc/core'
 import { parseSourceRef } from '../util/anchors.js'
 import type { ParsedArgs } from '../util/args.js'
 import { bold, cyan, dim, green, red, yellow } from '../util/colors.js'
@@ -23,6 +24,15 @@ import { allComponents, allModels, allTables } from '../util/space-walk.js'
  * means the code renamed the symbol — one RENAME line instead of a fork
  * into codeOnly + spaceOnly, and field drift is still computed across
  * the pair.
+ *
+ * Endpoints (v0.7 — shared inbound owners): a verb+path is NOT a unique
+ * key — a proxy module can re-serve a backend route under the same
+ * `GET /api/healthz`. Both inventories keep every owner of a key and the
+ * diff is per (key, owner module), so the shadowed owner never reports
+ * false drift and a genuinely missing owner still does. Only inbound
+ * component types (`INBOUND_HTTP_COMPONENT_TYPES`) own endpoints; the
+ * apiClient idiom (http metadata on client/page/widget) is skipped on
+ * both sides.
  *
  * `--json` prints the full structured diff (review tooling / auto-apply)
  * instead of the human report; exit codes are unchanged.
@@ -61,7 +71,7 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
     codeInv.models,
     diffById(spaceInv.models, codeInv.models),
   )
-  const endpointDiff = diffByKey(spaceInv.endpoints, codeInv.endpoints)
+  const endpointDiff = diffEndpoints(spaceInv.endpoints, codeInv.endpoints)
 
   // Field comparison follows the rename pairs: the renamed code entity is
   // re-keyed to its space id so `OrderDto → OrderResponse` still gets a
@@ -181,13 +191,13 @@ export async function cmdDrift(args: ParsedArgs): Promise<number> {
   printBlock(red('CRITICAL — code has, space missing:'), [
     ...tableDiff.codeOnly.map((id) => `table: ${id}`),
     ...modelDiff.codeOnly.map((id) => `model: ${id}`),
-    ...endpointDiff.codeOnly.map((k) => `endpoint: ${k}`),
+    ...endpointDiff.codeOnly.map((e) => fmtEndpointDrift(e)),
   ])
 
   printBlock(red('CRITICAL — space claims, code missing:'), [
     ...tableDiff.spaceOnly.map((id) => `table: ${id}`),
     ...modelDiff.spaceOnly.map((id) => `model: ${id}`),
-    ...endpointDiff.spaceOnly.map((k) => `endpoint: ${k}`),
+    ...endpointDiff.spaceOnly.map((e) => fmtEndpointDrift(e)),
   ])
 
   printBlock(yellow('RENAME — same sourceRef file, different id (code renamed the symbol):'), [
@@ -319,7 +329,8 @@ function readJsonl(file: string): CodeEntry[] {
 interface Inventory {
   tables: Map<string, TableShape>
   models: Map<string, ModelShape>
-  endpoints: Map<string, EndpointShape>
+  /** `METHOD /path` → every inbound owner of that key (one per module/method). */
+  endpoints: Map<string, EndpointOwner[]>
 }
 interface ColumnShape {
   sqlType: string
@@ -339,8 +350,10 @@ interface ModelShape {
   fields: Map<string, string> // name → type
   sourceRef?: string
 }
-interface EndpointShape {
+interface EndpointOwner {
   key: string // METHOD path
+  /** Owning module id; undefined for code entries with no `_placement.module`. */
+  module?: string
   componentRef?: string
   methodName?: string
 }
@@ -350,24 +363,34 @@ function indexSpace(space: Space): Inventory {
   for (const { table } of allTables(space)) tables.set(table.id, tableShape(table))
   const models = new Map<string, ModelShape>()
   for (const { model } of allModels(space)) models.set(model.id, modelShape(model))
-  const endpoints = new Map<string, EndpointShape>()
-  for (const { component, ref } of allComponents(space)) {
+  const endpoints = new Map<string, EndpointOwner[]>()
+  for (const { component, module, ref } of allComponents(space)) {
+    if (!INBOUND_HTTP_COMPONENT_TYPES.has(component.type)) continue
     for (const m of component.methods) {
       if (!m.httpMethod || !m.httpPath) continue
-      endpoints.set(endpointKey(m.httpMethod, m.httpPath), {
-        key: endpointKey(m.httpMethod, m.httpPath),
-        componentRef: ref,
-        methodName: m.name,
-      })
+      const key = endpointKey(m.httpMethod, m.httpPath)
+      addOwner(endpoints, { key, module: module.id, componentRef: ref, methodName: m.name })
     }
   }
   return { tables, models, endpoints }
 }
 
+function addOwner(index: Map<string, EndpointOwner[]>, owner: EndpointOwner): void {
+  const owners = index.get(owner.key)
+  if (owners) owners.push(owner)
+  else index.set(owner.key, [owner])
+}
+
+/** Code-side component entries may omit `type` (older extracts) — treat as inbound. */
+function isInboundCodeComponent(e: CodeEntry): boolean {
+  if (typeof e.type !== 'string') return true
+  return (INBOUND_HTTP_COMPONENT_TYPES as ReadonlySet<string>).has(e.type)
+}
+
 function indexCode(entries: CodeEntry[]): Inventory {
   const tables = new Map<string, TableShape>()
   const models = new Map<string, ModelShape>()
-  const endpoints = new Map<string, EndpointShape>()
+  const endpoints = new Map<string, EndpointOwner[]>()
   for (const e of entries) {
     if (e.kind === 'table' && e.id) {
       const cols = new Map<string, ColumnShape>()
@@ -387,13 +410,15 @@ function indexCode(entries: CodeEntry[]): Inventory {
       const shape: ModelShape = { id: e.id, fields: fs }
       if (typeof e.sourceRef === 'string') shape.sourceRef = e.sourceRef
       models.set(e.id, shape)
-    } else if (e.kind === 'component') {
+    } else if (e.kind === 'component' && isInboundCodeComponent(e)) {
+      const placement = e._placement as PlacementHint | undefined
       for (const m of e.methods ?? []) {
         if (m.httpMethod && m.httpPath) {
-          const key = endpointKey(m.httpMethod, m.httpPath)
-          const shape: EndpointShape = { key }
-          if (m.name) shape.methodName = m.name
-          endpoints.set(key, shape)
+          const owner: EndpointOwner = { key: endpointKey(m.httpMethod, m.httpPath) }
+          if (typeof placement?.module === 'string') owner.module = placement.module
+          if (e.id) owner.componentRef = e.id
+          if (m.name) owner.methodName = m.name
+          addOwner(endpoints, owner)
         }
       }
     }
@@ -437,8 +462,54 @@ function diffById<T>(space: Map<string, T>, code: Map<string, T>): IdDiff {
   const spaceOnly = [...space.keys()].filter((k) => !code.has(k)).sort()
   return { codeOnly, spaceOnly }
 }
-function diffByKey<T>(space: Map<string, T>, code: Map<string, T>): IdDiff {
-  return diffById(space, code)
+/** One (verb+path, owner module) pair present on only one side. */
+interface EndpointDriftEntry {
+  key: string
+  /** Absent only for code owners that carried no `_placement.module`. */
+  module?: string
+}
+interface EndpointDiff {
+  codeOnly: EndpointDriftEntry[]
+  spaceOnly: EndpointDriftEntry[]
+}
+
+/**
+ * Per-owner endpoint diff. A key served by modules A and B in the space and
+ * by A and B in the code is in sync; drop B from the code and only
+ * `(key, B)` drifts — A's declaration never shadows it. A code owner with
+ * no module (legacy JSONL without `_placement`) matches any space owner of
+ * the key, and satisfies every space owner of that key.
+ */
+function diffEndpoints(
+  space: Map<string, EndpointOwner[]>,
+  code: Map<string, EndpointOwner[]>,
+): EndpointDiff {
+  const codeOnly: EndpointDriftEntry[] = []
+  const spaceOnly: EndpointDriftEntry[] = []
+  const keys = [...new Set([...space.keys(), ...code.keys()])].sort()
+  for (const key of keys) {
+    const spaceOwners = space.get(key) ?? []
+    const codeOwners = code.get(key) ?? []
+    const spaceModules = new Set(spaceOwners.map((o) => o.module))
+    const codeModules = new Set(codeOwners.map((o) => o.module))
+    for (const mod of [...codeModules].sort(byOptional)) {
+      const matched = mod === undefined ? spaceOwners.length > 0 : spaceModules.has(mod)
+      if (!matched) codeOnly.push(mod === undefined ? { key } : { key, module: mod })
+    }
+    for (const mod of [...spaceModules].sort(byOptional)) {
+      const matched = codeModules.has(mod) || codeModules.has(undefined)
+      if (!matched) spaceOnly.push(mod === undefined ? { key } : { key, module: mod })
+    }
+  }
+  return { codeOnly, spaceOnly }
+}
+
+function byOptional(a: string | undefined, b: string | undefined): number {
+  return (a ?? '').localeCompare(b ?? '')
+}
+
+function fmtEndpointDrift(e: EndpointDriftEntry): string {
+  return e.module ? `endpoint: ${e.key}  (module:${e.module})` : `endpoint: ${e.key}`
 }
 
 // ---------- rename pairing (v0.6 — code-anchoring Phase 3) ----------

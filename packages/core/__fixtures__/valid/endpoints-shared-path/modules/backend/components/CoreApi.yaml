@@ -1,0 +1,14 @@
+kind: component
+id: CoreApi
+name: CoreApi
+type: controller
+methods:
+  - name: Healthz
+    httpMethod: GET
+    httpPath: /api/healthz
+  - name: ListFriends
+    httpMethod: GET
+    httpPath: /api/friends
+  - name: CreateOrder
+    httpMethod: POST
+    httpPath: /api/orders

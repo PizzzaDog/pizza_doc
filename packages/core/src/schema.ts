@@ -732,6 +732,22 @@ export const ComponentType = z.enum([
   'middleware',
 ])
 
+/**
+ * Component types that can OWN an inbound HTTP/SSE/WS surface. Single source
+ * of truth for every consumer that asks "is this method's httpMethod/httpPath
+ * a served endpoint?": `ruleHttpStepTargetController` (valid step targets),
+ * readiness endpoint rollup, and the CLI usage index behind `pd endpoints` /
+ * `coverage` / `orphans`. `client` / `page` / `widget` may carry http metadata
+ * too, but as the apiClient idiom — requests they *make*, not endpoints they
+ * serve — so they stay out of this set.
+ */
+export const INBOUND_HTTP_COMPONENT_TYPES: ReadonlySet<z.infer<typeof ComponentType>> = new Set([
+  'controller',
+  'consumer',
+  'subscriber',
+  'middleware',
+])
+
 export const ComponentSchema = z
   .object({
     kind: z.literal('component'),

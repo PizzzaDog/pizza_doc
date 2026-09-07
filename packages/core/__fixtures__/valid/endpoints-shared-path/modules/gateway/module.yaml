@@ -1,0 +1,4 @@
+kind: module
+id: gateway
+name: Gateway
+type: service

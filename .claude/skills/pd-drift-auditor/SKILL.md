@@ -68,8 +68,12 @@ reading yaml files directly):
 - Models: `id`, `modelKind`, `fields`.
 - Components: `id`, `type`, `methods` (each with `name`, `httpMethod`,
   `httpPath`, `params`, `returns`).
-- Endpoints: every `method` with `httpMethod` + `httpPath`, keyed as
-  `METHOD /path`.
+- Endpoints: every `httpMethod` + `httpPath` method on an inbound component
+  (`controller`, `consumer`, `subscriber`, `middleware`), keyed as
+  `METHOD /path` → owners. One key can have several owners (a proxy module
+  re-serving a backend route); `pd drift` compares per owner module.
+  `client` / `page` / `widget` http metadata is an outgoing call, not an
+  endpoint, on both sides.
 
 ### Step 4 — Diff side-by-side
 
@@ -81,8 +85,10 @@ Emit three diff-buckets:
 - drifted: shared tables with column differences.
 
 **Endpoints diff:**
-- code-only: endpoints the server exposes, space doesn't describe.
-- space-only: endpoints the space claims exist, code doesn't back up.
+- code-only: (verb+path, module) pairs the code serves, space doesn't describe.
+- space-only: (verb+path, module) pairs the space claims, code doesn't back up.
+- A key served by two modules drifts only for the owner that is missing;
+  the other owner never shadows it.
 
 **Models diff:**
 - code-only: DTO/entity classes with no matching model yaml.

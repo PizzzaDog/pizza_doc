@@ -45,7 +45,8 @@ export async function cmdOrphans(args: ParsedArgs): Promise<number> {
     section(
       'endpoints',
       unusedEndpoints,
-      ([key, info]) => `${key}  ${dim(`→ ${info.componentRef}/method:${info.methodName}`)}`,
+      ([key, owners]) =>
+        `${key}  ${dim(`→ ${owners.map((o) => `${o.componentRef}/method:${o.methodName}`).join(', ')}`)}`,
     )
   }
 

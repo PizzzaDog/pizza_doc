@@ -9,6 +9,7 @@ import type {
   Table,
   UseCaseStep,
 } from './schema.js'
+import { INBOUND_HTTP_COMPONENT_TYPES } from './schema.js'
 import type { ValidationIssue, ValidationResult } from './validator/types.js'
 
 export type ReadinessProfile = 'production'
@@ -96,7 +97,13 @@ interface UsageIndex {
   modelUsedBy: Map<string, Set<string>>
   tableUsedBy: Map<string, Set<string>>
   endpointsUsedBy: Map<string, Set<string>>
-  endpoints: Map<string, EndpointCtx>
+  /**
+   * `METHOD /path` → every owner. Distinct modules can legitimately serve
+   * the same verb+path (local proxy re-exposing a backend route), so the
+   * value is a list — collapsing to one owner made coverage and orphan
+   * attribution follow whichever module happened to load last.
+   */
+  endpoints: Map<string, EndpointCtx[]>
 }
 
 const PROOF_REQUIRED_PROTOCOLS = new Set(['device', 'exec', 'file'])
@@ -145,7 +152,11 @@ export function evaluateReadiness(
   const enforceableComponents = components.filter((c) => !isComponentReadinessWaived(c.component))
   const enforceableModels = models.filter((m) => !hasOrphanReason(m.model))
   const enforceableTables = tables.filter((t) => !hasOrphanReason(t.table))
-  const enforceableEndpoints = endpoints.filter(([, e]) => !hasOrphanReason(e.method))
+  // A shared key stays enforceable while ANY owner lacks an orphan reason —
+  // one module justifying its copy must not silently waive the other's.
+  const enforceableEndpoints = endpoints.filter(([, owners]) =>
+    owners.some((e) => !hasOrphanReason(e.method)),
+  )
 
   const componentMetric = metric(
     'components',
@@ -217,7 +228,7 @@ function pushOrphanIssues(
   components: ComponentCtx[],
   models: ModelCtx[],
   tables: TableCtx[],
-  endpoints: Array<[string, EndpointCtx]>,
+  endpoints: Array<[string, EndpointCtx[]]>,
 ): void {
   for (const c of components) {
     if (usage.componentUsedBy.get(c.ref)?.size) continue
@@ -249,15 +260,17 @@ function pushOrphanIssues(
       entityRef: t.ref,
     })
   }
-  for (const [key, e] of endpoints) {
+  for (const [key, owners] of endpoints) {
     if (usage.endpointsUsedBy.get(key)?.size) continue
-    if (hasOrphanReason(e.method)) continue
-    issues.push({
-      severity: 'error',
-      code: 'READINESS_ORPHAN_ENDPOINT',
-      message: `Endpoint '${key}' (${e.methodRef}) is not covered by any use case or explicit readiness.orphan reason.`,
-      entityRef: e.methodRef,
-    })
+    for (const e of owners) {
+      if (hasOrphanReason(e.method)) continue
+      issues.push({
+        severity: 'error',
+        code: 'READINESS_ORPHAN_ENDPOINT',
+        message: `Endpoint '${key}' (${e.methodRef}) is not covered by any use case or explicit readiness.orphan reason.`,
+        entityRef: e.methodRef,
+      })
+    }
   }
 }
 
@@ -349,7 +362,7 @@ function buildUsageIndex(space: Space): UsageIndex {
   const modelUsedBy = new Map<string, Set<string>>()
   const tableUsedBy = new Map<string, Set<string>>()
   const endpointsUsedBy = new Map<string, Set<string>>()
-  const endpoints = new Map<string, EndpointCtx>()
+  const endpoints = new Map<string, EndpointCtx[]>()
 
   const modelByName = new Map<string, string>()
   for (const { model, ref } of allModels(space)) modelByName.set(model.name, ref)
@@ -360,14 +373,11 @@ function buildUsageIndex(space: Space): UsageIndex {
   for (const { component, ref } of allComponents(space)) {
     for (const m of component.methods) {
       const methodRef = `${ref}/method:${m.name}`
-      if (component.type === 'controller' && m.httpMethod && m.httpPath) {
-        endpoints.set(endpointKey(m.httpMethod, m.httpPath), {
-          component,
-          componentRef: ref,
-          method: m,
-          methodName: m.name,
-          methodRef,
-        })
+      if (INBOUND_HTTP_COMPONENT_TYPES.has(component.type) && m.httpMethod && m.httpPath) {
+        const key = endpointKey(m.httpMethod, m.httpPath)
+        const owners = endpoints.get(key) ?? []
+        owners.push({ component, componentRef: ref, method: m, methodName: m.name, methodRef })
+        endpoints.set(key, owners)
       }
       for (const call of m.calls) {
         const ownerRef = call.target.split('/method:')[0]
@@ -416,10 +426,11 @@ function buildUsageIndex(space: Space): UsageIndex {
       }
       const targetHead = step.to.split('/method:')[0]
       const targetMethod = step.to.includes('/method:') ? step.to.split('/method:')[1] : undefined
-      for (const [key, info] of endpoints) {
-        if (info.componentRef !== targetHead) continue
-        if (targetMethod && info.methodName !== targetMethod) continue
-        add(endpointsUsedBy, key, useCaseRef)
+      for (const [key, owners] of endpoints) {
+        const hit = owners.some(
+          (o) => o.componentRef === targetHead && (!targetMethod || o.methodName === targetMethod),
+        )
+        if (hit) add(endpointsUsedBy, key, useCaseRef)
       }
     }
   }

@@ -1,3 +1,4 @@
+import { INBOUND_HTTP_COMPONENT_TYPES } from '@pizza-doc/core'
 import type { Component, Model, Space, Table, UseCaseStep } from '@pizza-doc/core'
 import { allComponents, allModels, allTables } from './space-walk.js'
 
@@ -14,6 +15,12 @@ import { allComponents, allModels, allTables } from './space-walk.js'
  * A table is "used" if any dataFlow writes to it or any step terminates
  * there.
  */
+/** One declarer of an endpoint key: the serving component + method. */
+export interface EndpointOwner {
+  componentRef: string
+  methodName: string
+}
+
 export interface UsageIndex {
   componentUsedBy: Map<string, Set<string>>
   modelUsedBy: Map<string, Set<string>>
@@ -21,8 +28,13 @@ export interface UsageIndex {
   componentMethodUsedBy: Map<string, Set<string>>
   /** Top-level endpoints: `METHOD /path` → use-case ids that exercise them. */
   endpointsUsedBy: Map<string, Set<string>>
-  /** Every component method with an httpMethod+httpPath, keyed as above. */
-  endpoints: Map<string, { componentRef: string; methodName: string }>
+  /**
+   * Every inbound method with an httpMethod+httpPath, keyed as above.
+   * A key can carry several owners: distinct modules may legitimately serve
+   * the same verb+path (e.g. a local proxy re-exposing a backend route), so
+   * the rollup must not collapse them to whichever module loaded last.
+   */
+  endpoints: Map<string, EndpointOwner[]>
 }
 
 export function buildUsageIndex(space: Space): UsageIndex {
@@ -31,7 +43,7 @@ export function buildUsageIndex(space: Space): UsageIndex {
   const tableUsedBy = new Map<string, Set<string>>()
   const componentMethodUsedBy = new Map<string, Set<string>>()
   const endpointsUsedBy = new Map<string, Set<string>>()
-  const endpoints = new Map<string, { componentRef: string; methodName: string }>()
+  const endpoints = new Map<string, EndpointOwner[]>()
 
   const modelByName = new Map<string, string>() // name → ref
   for (const { model, ref } of allModels(space)) modelByName.set(model.name, ref)
@@ -40,14 +52,18 @@ export function buildUsageIndex(space: Space): UsageIndex {
   for (const { table, ref } of allTables(space)) tableByName.set(table.name, ref)
 
   // Discover public endpoints + components that call other methods. Endpoint
-  // coverage is about inbound HTTP surface, so only controllers participate;
-  // frontend clients and external SDK wrappers may carry http metadata too,
-  // but they are consumers of endpoints, not endpoints themselves.
+  // coverage is about inbound HTTP surface, so only the inbound-capable types
+  // participate (controller / consumer / subscriber / middleware — the same
+  // set ruleHttpStepTargetController accepts as HTTP step targets); frontend
+  // clients and external SDK wrappers may carry http metadata too, but they
+  // are consumers of endpoints, not endpoints themselves.
   for (const { component, ref } of allComponents(space)) {
     for (const m of component.methods) {
-      if (component.type === 'controller' && m.httpMethod && m.httpPath) {
+      if (INBOUND_HTTP_COMPONENT_TYPES.has(component.type) && m.httpMethod && m.httpPath) {
         const key = endpointKey(m.httpMethod, m.httpPath)
-        endpoints.set(key, { componentRef: ref, methodName: m.name })
+        const owners = endpoints.get(key) ?? []
+        owners.push({ componentRef: ref, methodName: m.name })
+        endpoints.set(key, owners)
       }
       for (const call of m.calls) {
         // Track the called method's owning component.
@@ -102,9 +118,11 @@ export function buildUsageIndex(space: Space): UsageIndex {
         const [, method, rawPath] = descMatch
         if (method && rawPath) add(endpointsUsedBy, endpointKey(method, rawPath), useCaseRef)
       } else {
-        // Fall back: any endpoint whose componentRef === step.to.
-        for (const [key, info] of endpoints) {
-          if (info.componentRef === step.to) add(endpointsUsedBy, key, useCaseRef)
+        // Fall back: any endpoint with an owner whose componentRef === step.to.
+        for (const [key, owners] of endpoints) {
+          if (owners.some((o) => o.componentRef === step.to)) {
+            add(endpointsUsedBy, key, useCaseRef)
+          }
         }
       }
     }

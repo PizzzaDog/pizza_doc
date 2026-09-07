@@ -96,8 +96,8 @@ match what the context expects.
 - **Use case coherence** — step chain continuity, first-step-from-frontend,
   last-step-terminal.
 - **DTO flow consistency** — `step.via` type matches the target method's
-  parameter, `protocol: http` targets controllers, `protocol: sql` targets
-  tables.
+  parameter, `protocol: http` targets inbound components (controller /
+  consumer / subscriber / middleware), `protocol: sql` targets tables.
 - **Data flow** — source/target field existence, type compatibility,
   transform-required-when-types-differ, unused DTO fields, unwritten
   required columns.

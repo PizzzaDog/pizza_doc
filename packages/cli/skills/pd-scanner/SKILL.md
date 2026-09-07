@@ -160,7 +160,10 @@ The extractor is responsible for:
 - `_placement.spaceId` only when importing into a multi-space `spaces/<id>/`
   repo. In default `.pizza-doc/` layout, omit it or pass `--space-dir .pizza-doc`.
 - Correct `persistedAs:` refs for entity models (may emit placeholders).
-- `httpMethod` + `httpPath` + `calls:` on controller methods.
+- `httpMethod` + `httpPath` + `calls:` on inbound component methods
+  (`controller`, `consumer`, `subscriber`, `middleware`). On `client` /
+  `page` / `widget` the pair documents the outgoing request (apiClient
+  idiom), not a served endpoint.
 
 Your job:
 - Validate after each extractor pass.

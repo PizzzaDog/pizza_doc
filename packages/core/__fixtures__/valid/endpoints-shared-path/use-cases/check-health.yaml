@@ -1,0 +1,10 @@
+kind: usecase
+id: check-health
+name: Check health through the proxy
+actor: actor:visitor
+trigger: Monitoring probe hits the local proxy
+steps:
+  - from: actor:visitor
+    to: module:gateway/component:ProxyApi
+    protocol: http
+    description: GET /api/healthz — served by the local proxy.
