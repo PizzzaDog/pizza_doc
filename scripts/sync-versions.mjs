@@ -5,6 +5,9 @@
 // second half of `pnpm version-packages`, the Release PR's version step:
 //   changeset version && node scripts/sync-versions.mjs
 // `scripts/check-versions.mjs` (part of `pnpm check`) enforces the result.
+// The two private packages keep a stub CHANGELOG.md: changesets/action reads
+// `<pkg>/CHANGELOG.md` for every package whose version moved, and fails
+// the Release PR step on ENOENT otherwise.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
